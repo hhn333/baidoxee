@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#FFFFFF"
+    android:orientation="vertical">
+
+    <!-- Nội dung chính -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp">
+
+        <!-- Hình ảnh biển số -->
+        <ImageView
+            android:id="@+id/imagePlate"
+            android:layout_width="0dp"
+            android:layout_height="77dp"
+            android:layout_weight="1.5"
+            android:layout_gravity="center_vertical"
+            android:contentDescription="Hình ảnh biển số"
+            android:scaleType="centerCrop"
+            android:background="#F0F0F0"
+            android:src="@android:drawable/ic_menu_camera" />
+
+        <!-- Biển số xe -->
+        <TextView
+            android:id="@+id/textPlate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_gravity="center_vertical"
+            android:gravity="center"
+            android:text="29B-55555"
+            android:textColor="#D32F2F"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <!-- Thời gian vào -->
+        <TextView
+            android:id="@+id/textTimeIn"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.3"
+            android:layout_gravity="center_vertical"
+            android:gravity="center"
+            android:text="10:30"
+            android:textColor="#212121"
+            android:textSize="16sp" />
+
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:id="@+id/divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#E0E0E0" />
+
+</LinearLayout>

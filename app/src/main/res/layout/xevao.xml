@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/layout_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F5F5F5"
+    android:fitsSystemWindows="true"
+    tools:context=".XeVaoActivity">
+
+    <!-- Tiêu đề -->
+    <LinearLayout
+        android:id="@+id/titleLayout"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="#2196F3"
+        android:gravity="center"
+        android:padding="16dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Danh sách xe đang đỗ"
+            android:textColor="#FFFFFF"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Nội dung chính -->
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:id="@+id/contentLayout"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:padding="16dp"
+        app:layout_constraintTop_toBottomOf="@id/titleLayout"
+        app:layout_constraintBottom_toTopOf="@id/bottomNavigation"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <!-- Tìm kiếm -->
+        <EditText
+            android:id="@+id/etSearchPlate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:background="@android:drawable/edit_text"
+            android:hint="Tìm kiếm theo biển số..."
+            android:inputType="textCapCharacters"
+            android:padding="12dp"
+            android:drawableLeft="@android:drawable/ic_menu_search"
+            android:drawablePadding="8dp"
+            android:textSize="16sp"
+            app:layout_constraintTop_toTopOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Tổng số xe -->
+        <TextView
+            android:id="@+id/tvTotalCars"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Tổng số xe đang đỗ: 0"
+            android:textColor="#FF0000"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            app:layout_constraintTop_toBottomOf="@id/etSearchPlate"
+            app:layout_constraintStart_toStartOf="parent" />
+
+        <!-- Header bảng -->
+        <LinearLayout
+            android:id="@+id/headerLayout"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="#E0E0E0"
+            android:orientation="horizontal"
+            android:padding="12dp"
+            app:layout_constraintTop_toBottomOf="@id/tvTotalCars"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.5"
+                android:gravity="center"
+                android:text="Hình ảnh"
+                android:textStyle="bold"
+                android:textColor="#212121"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Biển số"
+                android:textStyle="bold"
+                android:textColor="#212121"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.3"
+                android:gravity="center"
+                android:text="Thời gian vào"
+                android:textStyle="bold"
+                android:textColor="#212121"
+                android:textSize="16sp" />
+        </LinearLayout>
+
+        <!-- RecyclerView thay thế ScrollView để consistent với Xera -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerView"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
+            app:layout_constraintTop_toBottomOf="@id/headerLayout"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent" />
+
+        <!-- Backup ScrollView (ẩn đi, giữ lại để tương thích code cũ) -->
+        <ScrollView
+            android:id="@+id/scrollViewCars"
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_marginTop="8dp"
+            android:fillViewport="true"
+            android:scrollbars="vertical"
+            android:visibility="gone"
+            app:layout_constraintTop_toBottomOf="@id/headerLayout"
+            app:layout_constraintBottom_toBottomOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintEnd_toEndOf="parent">
+
+            <LinearLayout
+                android:id="@+id/parkedCarsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <!-- Sample data - sẽ được thay thế bởi RecyclerView -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="#FFFFFF"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
+
+                    <ImageView
+                        android:layout_width="0dp"
+                        android:layout_height="77dp"
+                        android:layout_weight="1.5"
+                        android:contentDescription="Hình ảnh biển số"
+                        android:scaleType="fitCenter"
+                        android:background="#F0F0F0"
+                        android:src="@android:drawable/ic_menu_camera" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="29B-55555"
+                        android:textColor="#D32F2F"
+                        android:textSize="16sp"
+                        android:layout_gravity="center_vertical" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1.3"
+                        android:gravity="center"
+                        android:text="10:30"
+                        android:textColor="#212121"
+                        android:textSize="16sp"
+                        android:layout_gravity="center_vertical" />
+                </LinearLayout>
+
+                <!-- Dòng phân cách -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#E0E0E0" />
+
+                <!-- Sample data 2 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="#FFFFFF"
+                    android:orientation="horizontal"
+                    android:padding="12dp">
+
+                    <ImageView
+                        android:layout_width="0dp"
+                        android:layout_height="77dp"
+                        android:layout_weight="1.5"
+                        android:contentDescription="Hình ảnh biển số"
+                        android:scaleType="fitCenter"
+                        android:background="#F0F0F0"
+                        android:src="@android:drawable/ic_menu_camera" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="center"
+                        android:text="51H-12345"
+                        android:textColor="#D32F2F"
+                        android:textSize="16sp"
+                        android:layout_gravity="center_vertical" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1.3"
+                        android:gravity="center"
+                        android:text="14:00"
+                        android:textColor="#212121"
+                        android:textSize="16sp"
+                        android:layout_gravity="center_vertical" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </ScrollView>
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+    <!-- Bottom Navigation -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNavigation"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@android:color/white"
+        app:labelVisibilityMode="labeled"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:menu="@menu/bottom_navigation_menu" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

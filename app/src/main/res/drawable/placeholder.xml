@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="150dp"
+    android:viewportWidth="200"
+    android:viewportHeight="150">
+
+    <!-- Background -->
+    <path
+        android:fillColor="#E0E0E0"
+        android:pathData="M0,0 L200,0 L200,150 L0,150 Z"/>
+
+    <!-- Car icon -->
+    <path
+        android:fillColor="#9E9E9E"
+        android:pathData="M40,60 L160,60 L170,80 L170,110 L30,110 L30,80 Z"/>
+
+    <!-- Wheels (dùng path thay vì circle) -->
+    <path
+        android:fillColor="#424242"
+        android:pathData="M60,110 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
+    <path
+        android:fillColor="#424242"
+        android:pathData="M140,110 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0" />
+
+    <!-- Text "No Image" (vẫn chỉ là hình chữ nhật biểu tượng) -->
+    <path
+        android:fillColor="#757575"
+        android:pathData="M85,45 L115,45 L115,50 L85,50 Z"/>
+</vector>

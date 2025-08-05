@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="100dp"
+    android:orientation="horizontal"
+    android:background="#FFFFFF"
+    android:padding="12dp"
+    android:layout_marginBottom="2dp">
+
+    <!-- Ảnh xe -->
+    <ImageView
+        android:id="@+id/imagePlate"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.5"
+        android:scaleType="centerCrop"
+        android:background="#E0E0E0"
+        android:contentDescription="Ảnh xe" />
+
+    <!-- Biển số -->
+    <TextView
+        android:id="@+id/textPlate"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1.5"
+        android:gravity="center"
+        android:text="29B-12345"
+        android:textColor="#D32F2F"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <!-- Giờ vào -->
+    <TextView
+        android:id="@+id/textTimeIn"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="08:00"
+        android:textColor="#212121"
+        android:textSize="16sp" />
+
+    <!-- Giờ ra -->
+    <TextView
+        android:id="@+id/textTimeOut"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="08:10"
+        android:textColor="#212121"
+        android:textSize="16sp" />
+
+</LinearLayout>

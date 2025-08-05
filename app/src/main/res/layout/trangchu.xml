@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F8FAFC"
+    android:fitsSystemWindows="true">
+
+    <!-- Header -->
+    <LinearLayout
+        android:id="@+id/titleLayout"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="#1E88E5"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="20dp"
+        android:elevation="4dp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bãi Đỗ Xe ABC"
+                android:textColor="#FFFFFF"
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:fontFamily="sans-serif-medium" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvCurrentTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="02:44 PM"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvCurrentDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="18/07/2025"
+                android:textColor="#E3F2FD"
+                android:textSize="14sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ScrollView cho toàn bộ nội dung -->
+    <ScrollView
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        app:layout_constraintBottom_toTopOf="@+id/bottomNavigation"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@+id/titleLayout">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="16dp">
+
+            <!-- Thống kê tổng quan với card style -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="381dp"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="6dp"
+                app:cardUseCompatPadding="true">
+
+                <LinearLayout
+                    android:layout_width="363dp"
+                    android:layout_height="312dp"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        android:text="📊 Thống kê hiện tại"
+                        android:textColor="#1E293B"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <!-- Hàng 1: Chỗ trống và Xe đang đỗ -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        android:orientation="horizontal">
+
+                        <!-- Chỗ trống -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:layout_weight="1"
+                            android:background="#DCFCE7"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                android:id="@+id/tvParkingSpots"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:text="10"
+                                android:textColor="#065F46"
+                                android:textSize="28sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Chỗ trống"
+                                android:textColor="#065F46"
+                                android:textSize="14sp" />
+                        </LinearLayout>
+
+                        <!-- Xe đang đỗ -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="#FEE2E2"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                android:id="@+id/tvParkedCars"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:text="3"
+                                android:textColor="#7F1D1D"
+                                android:textSize="28sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Xe đang đỗ"
+                                android:textColor="#7F1D1D"
+                                android:textSize="14sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- Hàng 2: Xe hôm nay và Doanh thu -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <!-- Xe hôm nay -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="8dp"
+                            android:layout_weight="1"
+                            android:background="#FEF3C7"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                android:id="@+id/tvTodayCars"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:text="3"
+                                android:textColor="#92400E"
+                                android:textSize="28sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Xe hôm nay"
+                                android:textColor="#92400E"
+                                android:textSize="14sp" />
+                        </LinearLayout>
+
+                        <!-- Doanh thu -->
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="#F3E8FF"
+                            android:gravity="center"
+                            android:orientation="vertical"
+                            android:padding="16dp">
+
+                            <TextView
+                                android:id="@+id/tvRevenue"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="8dp"
+                                android:text="90 đ"
+                                android:textColor="#581C87"
+                                android:textSize="24sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Doanh thu"
+                                android:textColor="#581C87"
+                                android:textSize="14sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Hoạt động gần đây với card style -->
+            <androidx.cardview.widget.CardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="-15dp"
+                android:layout_marginBottom="20dp"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="6dp"
+                app:cardUseCompatPadding="true">
+
+                <LinearLayout
+                    android:id="@+id/recentActivityLayout"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="16dp"
+                        android:text="🕒 Hoạt động gần đây"
+                        android:textColor="#1E293B"
+                        android:textSize="18sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:id="@+id/recentActivityContainer"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <!-- Dòng 1: Xe ra - 30A-98765 - 11:20 - 60,000 đ -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:padding="4dp">
+
+                            <!-- Cột mũi tên -->
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="0.5"
+                                android:gravity="center"
+                                android:text="→"
+                                android:textColor="#D32F2F"
+                                android:textSize="20sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1.5"
+                                android:text="30A-98765"
+                                android:textColor="#D32F2F"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:text="11:20"
+                                android:textColor="#212121"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="end"
+                                android:text=""
+                                android:textColor="#212121"
+                                android:textSize="16sp" />
+                        </LinearLayout>
+
+                        <!-- Dòng 2: Xe vào - 29B-55555 - 11:15 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:padding="4dp">
+
+                            <!-- Cột mũi tên -->
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="0.5"
+                                android:gravity="center"
+                                android:text="←"
+                                android:textColor="#2E7D32"
+                                android:textSize="20sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1.5"
+                                android:text="29B-55555"
+                                android:textColor="#2E7D32"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:text="11:15"
+                                android:textColor="#212121"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="end"
+                                android:text="30,000đ"
+                                android:textColor="#212121"
+                                android:textSize="16sp" />
+                        </LinearLayout>
+
+                        <!-- Dòng 3: Xe ra - 51C-77777 - 11:10 - 30,000 đ -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:padding="4dp">
+
+                            <!-- Cột mũi tên -->
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="0.5"
+                                android:gravity="center"
+                                android:text="→"
+                                android:textColor="#D32F2F"
+                                android:textSize="20sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1.5"
+                                android:text="51C-77777"
+                                android:textColor="#D32F2F"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="center"
+                                android:text="11:10"
+                                android:textColor="#212121"
+                                android:textSize="16sp" />
+
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:gravity="end"
+                                android:text=""
+                                android:textColor="#212121"
+                                android:textSize="16sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Bottom Navigation -->
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottomNavigation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@android:color/white"
+        android:elevation="8dp"
+        app:labelVisibilityMode="labeled"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:menu="@menu/bottom_navigation_menu" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
