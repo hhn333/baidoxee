@@ -27,34 +27,41 @@ import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
-import java.util.concurrent.TimeUnit;
 
 public class ThanhToanActivity extends BaseActivity {
 
     private static final String TAG = "ThanhToanActivity";
 
     private BottomNavigationView bottomNavigationView;
-    private TextView tvBienSoXe, tvThoiGianVao, tvThoiGianRa, tvGiaVe, tvLoaiXe;
+    private TextView tvBienSoXe, tvThoiGianVao, tvThoiGianRa, tvGiaVe;
     private Button btnInHoaDon;
     private TextView tvThongBao;
     private RadioGroup rgPaymentMethod;
     private RadioButton rbTienMat, rbChuyenKhoan;
     private LinearLayout invoiceLayout;
 
-    // Dữ liệu hóa đơn
+    // Helper classes
+    private PaymentHelper paymentHelper;
+    private InvoiceHelper invoiceHelper;
+
+    // Dữ liệu hóa đơn - CẬP NHẬT: sử dụng event IDs thay vì vehicle IDs
     private String bienSoXe;
     private String thoiGianVao;
     private String thoiGianRa;
     private long giaVe;
     private String activityId;
     private String hinhThucThanhToan = "tien_mat"; // Mặc định là tiền mặt
-    private String vehicleId; // ID của xe trong collection vehicles
+    private String eventEnterId; // ID của event vào từ events collection
+    private String eventExitId;  // ID của event ra từ events collection
     private String vehicleType = "CAR_UNDER_9"; // Loại xe
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.thanhtoan);
+
+        // Khởi tạo helper classes
+        initHelpers();
 
         // Khởi tạo views
         initViews();
@@ -78,6 +85,11 @@ public class ThanhToanActivity extends BaseActivity {
 
         // Setup payment method selection
         setupPaymentMethodSelection();
+    }
+
+    private void initHelpers() {
+        paymentHelper = new PaymentHelper(this);
+        invoiceHelper = new InvoiceHelper(this);
     }
 
     private void initViews() {
@@ -137,14 +149,15 @@ public class ThanhToanActivity extends BaseActivity {
         }
     }
 
-    private void resetActivityData() {
+    public void resetActivityData() {
         activityId = null;
         bienSoXe = null;
         thoiGianVao = null;
         thoiGianRa = null;
         giaVe = 0;
         hinhThucThanhToan = "tien_mat";
-        vehicleId = null;
+        eventEnterId = null;  // Reset event enter ID
+        eventExitId = null;   // Reset event exit ID
         vehicleType = "CAR_UNDER_9";
 
         // Reset radio button về mặc định
@@ -187,7 +200,11 @@ public class ThanhToanActivity extends BaseActivity {
             @Override
             public void onClick(View v) {
                 if (kiemTraThongTinHopLe()) {
-                    thanhToanVaInHoaDon();
+                    // CẬP NHẬT: truyền event IDs thay vì vehicle IDs
+                    paymentHelper.processPaymentAndPrint(
+                            activityId, bienSoXe, thoiGianVao, thoiGianRa,
+                            giaVe, hinhThucThanhToan, eventEnterId, vehicleType
+                    );
                 }
             }
         });
@@ -200,11 +217,12 @@ public class ThanhToanActivity extends BaseActivity {
                 if (checkedId == R.id.rbTienMat) {
                     hinhThucThanhToan = "tien_mat";
                     Log.d(TAG, "Payment method selected: Tiền mặt");
-                    capNhatHinhThucThanhToan("tien_mat");
+                    // CẬP NHẬT: truyền event enter ID thay vì vehicle ID
+                    paymentHelper.updatePaymentMethod(activityId, eventEnterId, vehicleType, "tien_mat");
                 } else if (checkedId == R.id.rbChuyenKhoan) {
                     hinhThucThanhToan = "chuyen_khoan";
                     Log.d(TAG, "Payment method selected: Chuyển khoản");
-                    capNhatHinhThucThanhToan("chuyen_khoan");
+                    paymentHelper.updatePaymentMethod(activityId, eventEnterId, vehicleType, "chuyen_khoan");
                 }
             }
         });
@@ -229,64 +247,8 @@ public class ThanhToanActivity extends BaseActivity {
         return true;
     }
 
-    private void capNhatHinhThucThanhToan(String phuongThuc) {
-        if (activityId == null || activityId.isEmpty()) {
-            Log.w(TAG, "ActivityId is null, cannot update payment method");
-            return;
-        }
-
-        try {
-            JSONObject updateData = new JSONObject();
-            updateData.put("hinhThucThanhToan", phuongThuc);
-            updateData.put("thoiGianChonPhuongThuc", getCurrentTime());
-
-            // Thêm vehicle ID và vehicle type nếu có
-            if (vehicleId != null && !vehicleId.isEmpty()) {
-                updateData.put("vehicle", vehicleId);
-            }
-            if (vehicleType != null && !vehicleType.isEmpty()) {
-                updateData.put("vehicleType", vehicleType);
-            }
-
-            Log.d(TAG, "Updating payment method to: " + phuongThuc);
-
-            ApiHelper.updateActivity(activityId, updateData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    Log.d(TAG, "Payment method updated successfully: " + phuongThuc);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            String displayText = phuongThuc.equals("tien_mat") ? "Tiền mặt" : "Chuyển khoản";
-                            Toast.makeText(ThanhToanActivity.this,
-                                    "Đã chọn hình thức: " + displayText,
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                }
-
-                @Override
-                public void onError(String errorMessage) {
-                    Log.e(TAG, "Failed to update payment method: " + errorMessage);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(ThanhToanActivity.this,
-                                    "Lỗi cập nhật hình thức thanh toán: " + errorMessage,
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                }
-            });
-
-        } catch (JSONException e) {
-            Log.e(TAG, "Error creating payment method update JSON", e);
-            Toast.makeText(this, "Lỗi tạo dữ liệu cập nhật", Toast.LENGTH_SHORT).show();
-        }
-    }
-
     private void kiemTraXeCanThanhToan() {
-        Log.d(TAG, "Checking for vehicles needing payment");
+        Log.d(TAG, "Checking for vehicles needing payment from events collection");
 
         showLoadingState("Đang tìm kiếm xe cần thanh toán...");
 
@@ -347,7 +309,7 @@ public class ThanhToanActivity extends BaseActivity {
     }
 
     private void layThongTinThanhToanTheoBienSo(String bienSo) {
-        Log.d(TAG, "Getting vehicle info for: " + bienSo);
+        Log.d(TAG, "Getting vehicle info for plate from events: " + bienSo);
 
         showLoadingState("Đang tải thông tin xe " + bienSo + "...");
 
@@ -397,43 +359,24 @@ public class ThanhToanActivity extends BaseActivity {
     }
 
     private void xuLyDuLieuThanhToan(JSONObject data) throws JSONException {
-        // Lấy thông tin từ response
-        activityId = data.getString("_id");
-        bienSoXe = data.getString("bienSoXe");
-        thoiGianVao = data.getString("thoiGianVao");
+        // Sử dụng PaymentHelper để xử lý dữ liệu
+        PaymentHelper.PaymentData paymentData = paymentHelper.processPaymentData(data);
 
-        // Lấy vehicle ID và vehicle type nếu có
-        if (data.has("vehicle") && !data.isNull("vehicle")) {
-            vehicleId = data.getString("vehicle");
-        }
-        if (data.has("vehicleType") && !data.isNull("vehicleType")) {
-            vehicleType = data.getString("vehicleType");
-        }
+        // Cập nhật dữ liệu activity - CẬP NHẬT: sử dụng event IDs
+        activityId = paymentData.activityId;
+        bienSoXe = paymentData.bienSoXe;
+        thoiGianVao = paymentData.thoiGianVao;
+        thoiGianRa = paymentData.thoiGianRa;
+        giaVe = paymentData.giaVe;
+        eventEnterId = paymentData.eventEnterId;  // Event enter ID từ events collection
+        eventExitId = paymentData.eventExitId;    // Event exit ID từ events collection
+        vehicleType = paymentData.vehicleType;
+        hinhThucThanhToan = paymentData.hinhThucThanhToan;
 
-        // Kiểm tra xem có thời gian ra chưa
-        if (data.has("thoiGianRa") && !data.isNull("thoiGianRa")) {
-            thoiGianRa = data.getString("thoiGianRa");
-        } else {
-            // Nếu chưa có thời gian ra, set thời gian hiện tại
-            thoiGianRa = getCurrentTime();
-        }
-
-        // Kiểm tra xem có hình thức thanh toán đã được chọn chưa
-        if (data.has("hinhThucThanhToan") && !data.isNull("hinhThucThanhToan")) {
-            hinhThucThanhToan = data.getString("hinhThucThanhToan");
-        }
-
-        // Kiểm tra giá vé từ database trước
-        if (data.has("giaVe") && !data.isNull("giaVe")) {
-            giaVe = data.getLong("giaVe");
-        } else {
-            // Tính giá vé dựa trên thời gian đậu nếu chưa có
-            giaVe = tinhGiaVe(thoiGianVao, thoiGianRa, vehicleType);
-        }
-
-        Log.d(TAG, "Processing payment data:");
+        Log.d(TAG, "Processing payment data from events collection:");
         Log.d(TAG, "Activity ID: " + activityId);
-        Log.d(TAG, "Vehicle ID: " + vehicleId);
+        Log.d(TAG, "Event Enter ID: " + eventEnterId);
+        Log.d(TAG, "Event Exit ID: " + eventExitId);
         Log.d(TAG, "Vehicle Type: " + vehicleType);
         Log.d(TAG, "License plate: " + bienSoXe);
         Log.d(TAG, "Time in: " + thoiGianVao);
@@ -457,104 +400,18 @@ public class ThanhToanActivity extends BaseActivity {
             }
         });
 
-        // Cập nhật trạng thái xe ra trong database nếu chưa có
-        if (!data.has("thoiGianRa") || data.isNull("thoiGianRa")) {
-            capNhatXeRa();
-        }
-    }
-
-    private void capNhatXeRa() {
-        try {
-            JSONObject updateData = new JSONObject();
-            updateData.put("thoiGianRa", thoiGianRa);
-            updateData.put("trangThai", "da_ra");
-            updateData.put("giaVe", giaVe);
-
-            // Thêm vehicle ID và type nếu có
-            if (vehicleId != null && !vehicleId.isEmpty()) {
-                updateData.put("vehicle", vehicleId);
-            }
-            if (vehicleType != null && !vehicleType.isEmpty()) {
-                updateData.put("vehicleType", vehicleType);
-            }
-
-            ApiHelper.updateActivity(activityId, updateData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    Log.d(TAG, "Updated vehicle checkout successfully");
-                }
-
-                @Override
-                public void onError(String errorMessage) {
-                    Log.e(TAG, "Failed to update vehicle checkout: " + errorMessage);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(ThanhToanActivity.this,
-                                    "Lỗi cập nhật dữ liệu: " + errorMessage,
-                                    Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                }
-            });
-
-        } catch (JSONException e) {
-            Log.e(TAG, "Error creating update JSON", e);
+        // Cập nhật trạng thái xe ra trong database nếu cần
+        if (paymentData.needsCheckoutUpdate) {
+            // CẬP NHẬT: truyền event enter ID thay vì vehicle ID
+            paymentHelper.updateVehicleCheckout(activityId, thoiGianRa, giaVe, eventEnterId, vehicleType);
         }
     }
 
     private void hienThiThongTinHoaDon() {
-        // Hiển thị biển số xe với emoji
-        if (tvBienSoXe != null) {
-            tvBienSoXe.setText("🚗 Biển số xe: " + bienSoXe);
-            Log.d(TAG, "Displaying license plate: " + bienSoXe);
-        }
-
-        // Hiển thị loại xe
-        if (tvLoaiXe != null) {
-            String displayVehicleType = getDisplayVehicleType(vehicleType);
-            tvLoaiXe.setText("🚙 Loại xe: " + displayVehicleType);
-            Log.d(TAG, "Displaying vehicle type: " + displayVehicleType);
-        }
-
-        // Hiển thị thời gian vào
-        if (tvThoiGianVao != null) {
-            String formattedTimeIn = formatDisplayTime(thoiGianVao);
-            tvThoiGianVao.setText("⏰ Thời gian vào: " + formattedTimeIn);
-            Log.d(TAG, "Displaying time in: " + formattedTimeIn);
-        }
-
-        // Hiển thị thời gian ra
-        if (tvThoiGianRa != null) {
-            String formattedTimeOut = formatDisplayTime(thoiGianRa);
-            tvThoiGianRa.setText("🚪 Thời gian ra: " + formattedTimeOut);
-            Log.d(TAG, "Displaying time out: " + formattedTimeOut);
-        }
-
-        // Hiển thị giá vé với định dạng tiền tệ Việt Nam
-        if (tvGiaVe != null) {
-            NumberFormat formatter = NumberFormat.getInstance(new Locale("vi", "VN"));
-            String formattedPrice = formatter.format(giaVe) + "đ";
-            tvGiaVe.setText("💰 Giá vé: " + formattedPrice);
-            Log.d(TAG, "Displaying price: " + formattedPrice);
-        }
-    }
-
-    private String getDisplayVehicleType(String vehicleType) {
-        switch (vehicleType) {
-            case "CAR_UNDER_9":
-                return "Ô tô dưới 9 chỗ";
-            case "CAR_9_TO_16":
-                return "Ô tô 9-16 chỗ";
-            case "MOTORCYCLE":
-                return "Xe máy";
-            case "TRUCK":
-                return "Xe tải";
-            case "BUS":
-                return "Xe buýt";
-            default:
-                return "Ô tô dưới 9 chỗ";
-        }
+        invoiceHelper.displayInvoiceInfo(
+                tvBienSoXe, tvThoiGianVao, tvThoiGianRa, tvGiaVe,
+                bienSoXe, vehicleType, thoiGianVao, thoiGianRa, giaVe
+        );
     }
 
     private void showLoadingState(String message) {
@@ -574,236 +431,22 @@ public class ThanhToanActivity extends BaseActivity {
         Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
-    private String getCurrentTime() {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault());
-        return sdf.format(new Date());
-    }
-
-    private String formatDisplayTime(String timeString) {
-        try {
-            SimpleDateFormat inputFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault());
-            SimpleDateFormat outputFormat = new SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault());
-            Date date = inputFormat.parse(timeString);
-            return outputFormat.format(date);
-        } catch (Exception e) {
-            Log.e(TAG, "Error formatting time: " + timeString, e);
-            // Thử format khác nếu format đầu không thành công
-            try {
-                SimpleDateFormat inputFormat2 = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault());
-                SimpleDateFormat outputFormat = new SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault());
-                Date date = inputFormat2.parse(timeString.replace("Z", ""));
-                return outputFormat.format(date);
-            } catch (Exception e2) {
-                Log.e(TAG, "Error formatting time with alternative format: " + timeString, e2);
-                return timeString;
-            }
+    public void resetButton() {
+        if (btnInHoaDon != null) {
+            btnInHoaDon.setEnabled(true);
+            btnInHoaDon.setText("💰 Thanh toán & In hóa đơn");
         }
     }
 
-    private long tinhGiaVe(String thoiGianVao, String thoiGianRa, String vehicleType) {
-        try {
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault());
-            Date dateVao = sdf.parse(thoiGianVao);
-            Date dateRa = sdf.parse(thoiGianRa);
-
-            if (dateVao != null && dateRa != null) {
-                long diffInMillis = dateRa.getTime() - dateVao.getTime();
-                long diffInMinutes = TimeUnit.MILLISECONDS.toMinutes(diffInMillis);
-
-                // Quy tắc tính giá dựa theo loại xe
-                long basePrice = 3000; // Mặc định cho xe dưới 9 chỗ
-                long blockPrice = 2000;
-
-                switch (vehicleType) {
-                    case "CAR_9_TO_16":
-                        basePrice = 5000;
-                        blockPrice = 3000;
-                        break;
-                    case "MOTORCYCLE":
-                        basePrice = 2000;
-                        blockPrice = 1000;
-                        break;
-                    case "TRUCK":
-                    case "BUS":
-                        basePrice = 8000;
-                        blockPrice = 5000;
-                        break;
-                }
-
-                long gia = basePrice; // Giá cơ bản 30 phút đầu
-
-                if (diffInMinutes > 30) {
-                    long extraBlocks = (diffInMinutes - 30 + 29) / 30; // Làm tròn lên
-                    gia += extraBlocks * blockPrice;
-                }
-
-                Log.d(TAG, "Calculated price: " + gia + " for " + diffInMinutes + " minutes, vehicle type: " + vehicleType);
-                return gia;
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error calculating price", e);
-        }
-
-        return 3000; // Giá mặc định
-    }
-
-    private void thanhToanVaInHoaDon() {
-        // Kiểm tra hình thức thanh toán đã được chọn
-        String paymentMethodText = hinhThucThanhToan.equals("tien_mat") ? "Tiền mặt" : "Chuyển khoản";
-
-        try {
-            // Cập nhật trạng thái thanh toán trước khi in
-            JSONObject updatePaymentData = new JSONObject();
-            updatePaymentData.put("trangThaiThanhToan", "da_thanh_toan");
-            updatePaymentData.put("thoiGianThanhToan", getCurrentTime());
-            updatePaymentData.put("hinhThucThanhToan", hinhThucThanhToan);
-            updatePaymentData.put("giaVe", giaVe);
-
-            // Thêm vehicle ID và type nếu có
-            if (vehicleId != null && !vehicleId.isEmpty()) {
-                updatePaymentData.put("vehicle", vehicleId);
-            }
-            if (vehicleType != null && !vehicleType.isEmpty()) {
-                updatePaymentData.put("vehicleType", vehicleType);
-            }
-
-            // Disable button để tránh spam
+    public void setButtonProcessing() {
+        if (btnInHoaDon != null) {
             btnInHoaDon.setEnabled(false);
             btnInHoaDon.setText("Đang xử lý...");
-
-            Log.d(TAG, "Processing payment and printing invoice...");
-
-            ApiHelper.updateActivity(activityId, updatePaymentData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    Log.d(TAG, "Payment status updated successfully");
-                    // Sau khi cập nhật thành công, tiến hành in hóa đơn
-                    guiLenhInHoaDon(paymentMethodText);
-                }
-
-                @Override
-                public void onError(String errorMessage) {
-                    Log.e(TAG, "Failed to update payment status: " + errorMessage);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(ThanhToanActivity.this,
-                                    "Lỗi cập nhật trạng thái thanh toán: " + errorMessage,
-                                    Toast.LENGTH_LONG).show();
-
-                            // Reset button
-                            resetButton();
-                        }
-                    });
-                }
-            });
-
-        } catch (JSONException e) {
-            Log.e(TAG, "Error creating payment update JSON", e);
-            Toast.makeText(this, "Lỗi tạo dữ liệu thanh toán", Toast.LENGTH_SHORT).show();
-            resetButton();
         }
     }
 
-    private void guiLenhInHoaDon(String paymentMethodText) {
-        try {
-            JSONObject printData = new JSONObject();
-            printData.put("bienSoXe", bienSoXe);
-            printData.put("loaiXe", getDisplayVehicleType(vehicleType));
-            printData.put("thoiGianVao", formatDisplayTime(thoiGianVao));
-            printData.put("thoiGianRa", formatDisplayTime(thoiGianRa));
-            printData.put("giaVe", giaVe);
-            printData.put("hinhThucThanhToan", paymentMethodText);
-            printData.put("activityId", activityId);
-            printData.put("timestamp", System.currentTimeMillis());
-
-            // Thêm vehicle ID và type nếu có
-            if (vehicleId != null && !vehicleId.isEmpty()) {
-                printData.put("vehicleId", vehicleId);
-            }
-            if (vehicleType != null && !vehicleType.isEmpty()) {
-                printData.put("vehicleType", vehicleType);
-            }
-
-            Log.d(TAG, "Sending print command: " + printData.toString());
-
-            ApiHelper.sendPrintCommand(printData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    Log.d(TAG, "Print command sent successfully");
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.makeText(ThanhToanActivity.this,
-                                    "Thanh toán thành công! Đã gửi lệnh in hóa đơn!",
-                                    Toast.LENGTH_LONG).show();
-
-                            showInHoaDonDialog(paymentMethodText);
-                            resetButton();
-                        }
-                    });
-                }
-
-                @Override
-                public void onError(String errorMessage) {
-                    Log.e(TAG, "Failed to send print command: " + errorMessage);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            // Thanh toán đã thành công nhưng in thất bại
-                            Toast.makeText(ThanhToanActivity.this,
-                                    "Thanh toán thành công nhưng lỗi in hóa đơn: " + errorMessage,
-                                    Toast.LENGTH_LONG).show();
-
-                            showInHoaDonDialog(paymentMethodText);
-                            resetButton();
-                        }
-                    });
-                }
-            });
-
-        } catch (JSONException e) {
-            Log.e(TAG, "Error creating print JSON", e);
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(ThanhToanActivity.this,
-                            "Thanh toán thành công nhưng lỗi tạo dữ liệu in",
-                            Toast.LENGTH_SHORT).show();
-                    resetButton();
-                }
-            });
-        }
-    }
-
-    private void resetButton() {
-        btnInHoaDon.setEnabled(true);
-        btnInHoaDon.setText("💰 Thanh toán & In hóa đơn");
-    }
-
-    private void showInHoaDonDialog(String paymentMethodText) {
-        androidx.appcompat.app.AlertDialog.Builder builder =
-                new androidx.appcompat.app.AlertDialog.Builder(this);
-
-        NumberFormat formatter = NumberFormat.getInstance(new Locale("vi", "VN"));
-
-        builder.setTitle("✅ Thanh toán thành công")
-                .setMessage("Cảm ơn quý khách đã sử dụng dịch vụ!\n\n" +
-                        "════════════════════════\n" +
-                        "📋 THÔNG TIN HÓA ĐƠN\n" +
-                        "════════════════════════\n" +
-                        "🚗 Biển số: " + bienSoXe + "\n" +
-                        "⏰ Vào lúc: " + formatDisplayTime(thoiGianVao) + "\n" +
-                        "🚪 Ra lúc: " + formatDisplayTime(thoiGianRa) + "\n" +
-                        "💰 Số tiền: " + formatter.format(giaVe) + " đ\n" +
-                        "💳 Hình thức: " + paymentMethodText + "\n" +
-                        "════════════════════════\n\n" )
-                .setPositiveButton("OK", (dialog, which) -> {
-                    dialog.dismiss();
-                    // Reset dữ liệu và hiển thị thông báo không có xe
-                    resetActivityData();
-                })
-                .setCancelable(false)
-                .show();
+    public void showSuccessDialog(String bienSoXe, String thoiGianVao, String thoiGianRa,
+                                  long giaVe, String paymentMethodText) {
+        invoiceHelper.showSuccessDialog(bienSoXe, thoiGianVao, thoiGianRa, giaVe, paymentMethodText);
     }
 }

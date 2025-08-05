@@ -12,7 +12,7 @@ import java.net.URL;
 public class ApiHelper {
 
     // IP address của bạn
-    private static final String BASE_URL = "http://192.168.1.19:3000/api";
+    private static final String BASE_URL = "http://192.168.102.171:3000/api";
     private static final String TAG = "ApiHelper";
 
     // Interface để handle callback
