@@ -63,7 +63,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Tổng số lượt xe ra: 0"
+            android:text="Tổng số xe đã ra: 0"
             android:textColor="#FF0000"
             android:textSize="18sp"
             android:textStyle="bold"
@@ -82,16 +82,6 @@
             app:layout_constraintTop_toBottomOf="@id/tvTotalCars"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintEnd_toEndOf="parent">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1.5"
-                android:gravity="center"
-                android:text="Hình ảnh"
-                android:textStyle="bold"
-                android:textColor="#212121"
-                android:textSize="16sp" />
 
             <TextView
                 android:layout_width="0dp"

@@ -7,213 +7,94 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Tạo HTTP server cho Socket.IO
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST", "PUT", "DELETE"]
-    }
-});
+const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST", "PUT", "DELETE"] } });
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// ✅ Kết nối MongoDB Atlas
-const mongoURI = 'mongodb+srv://chuong:maihuychuong@cluster0.wcohcgr.mongodb.net/parkinglotdb?retryWrites=true&w=majority&appName=Cluster0';
-mongoose.connect(mongoURI)
+// MongoDB Connection
+mongoose.connect('mongodb+srv://chuong:maihuychuong@cluster0.wcohcgr.mongodb.net/parkinglotdb?retryWrites=true&w=majority&appName=Cluster0')
     .then(() => console.log('✅ Kết nối MongoDB thành công'))
     .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
-// ✅ Schema cho events collection
+// Schemas
 const eventSchema = new mongoose.Schema({
-    camera_id: { type: String, required: true },
-    spot_id: { type: String, required: true },
-    spot_name: { type: String, required: true },
-    event_type: {
-        type: String,
-        enum: ['enter', 'exit'],
-        required: true
-    },
+    camera_id: String, spot_id: String, spot_name: String,
+    event_type: { type: String, enum: ['enter', 'exit'], required: true },
     timestamp: { type: Date, required: true },
     plate_text: { type: String, required: true },
     plate_confidence: { type: Number, default: 0 },
-    vehicle_image: { type: String },
-    plate_image: { type: String },
-    location_name: { type: String },
+    vehicle_image: String, plate_image: String, location_name: String,
     processed: { type: Boolean, default: false },
     created_at: { type: Date, default: Date.now },
-    vehicle_id: { type: String }, // ID từ events collection
-    vehicleType: {
-        type: String,
-        enum: ['CAR_UNDER_9', 'CAR_9_TO_16', 'MOTORCYCLE', 'TRUCK', 'BUS'],
-        default: 'CAR_UNDER_9'
-    }
-}, {
-    collection: 'events',
-    timestamps: false,
-    versionKey: false
-});
+    vehicle_id: String,
+    vehicleType: { type: String, enum: ['CAR_UNDER_9', 'CAR_9_TO_16'], default: 'CAR_UNDER_9' }
+}, { collection: 'events', timestamps: false, versionKey: false });
 
-// ✅ Schema cho parking_logs (cập nhật để tham chiếu đến events)
 const parkingLogSchema = new mongoose.Schema({
     event_enter_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
     event_exit_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', default: null },
-    plate_text: { type: String, required: true }, // Lưu trực tiếp từ events
     timeIn: { type: Date, required: true },
     timeOut: { type: Date, default: null },
-    status: {
-        type: String,
-        enum: ['IN_PROGRESS', 'COMPLETED', 'PAID'],
-        default: 'IN_PROGRESS'
-    },
+    status: { type: String, enum: ['IN_PROGRESS', 'COMPLETED', 'PAID'], default: 'IN_PROGRESS' },
     fee: { type: Number, default: 0 },
-    vehicleType: {
-        type: String,
-        enum: ['CAR_UNDER_9', 'CAR_9_TO_16', 'MOTORCYCLE', 'TRUCK', 'BUS'],
-        default: 'CAR_UNDER_9'
-    },
-    // Thêm các trường thanh toán
-    paymentMethod: {
-        type: String,
-        enum: ['CASH', 'BANK_TRANSFER'],
-        default: 'CASH'
-    },
-    paymentStatus: {
-        type: String,
-        enum: ['PENDING', 'PAID', 'FAILED'],
-        default: 'PENDING'
-    },
+    vehicleType: { type: String, enum: ['CAR_UNDER_9', 'CAR_9_TO_16'], default: 'CAR_UNDER_9' },
+    paymentMethod: { type: String, enum: ['CASH', 'BANK_TRANSFER'], default: 'CASH' },
+    paymentStatus: { type: String, enum: ['PENDING', 'PAID', 'FAILED'], default: 'PENDING' },
     paymentDate: { type: Date, default: null }
-}, {
-    collection: 'parking_logs',
-    timestamps: false,
-    versionKey: false
-});
+}, { collection: 'parking_logs', timestamps: false, versionKey: false });
 
-// ✅ Schema cho transactions
 const transactionSchema = new mongoose.Schema({
     log: { type: mongoose.Schema.Types.ObjectId, ref: 'ParkingLog', required: true },
     amount: { type: Number, required: true },
-    method: {
-        type: String,
-        enum: ['CASH', 'BANK_TRANSFER'],
-        default: 'CASH'
-    },
-    status: {
-        type: String,
-        enum: ['PAID', 'PENDING', 'FAILED'],
-        default: 'PENDING'
-    },
+    method: { type: String, enum: ['CASH', 'BANK_TRANSFER'], default: 'CASH' },
+    status: { type: String, enum: ['PAID', 'PENDING', 'FAILED'], default: 'PENDING' },
     paidAt: { type: Date, default: Date.now }
-}, {
-    collection: 'transactions',
-    timestamps: false,
-    versionKey: false
-});
+}, { collection: 'transactions', timestamps: false, versionKey: false });
 
-// Models
 const Event = mongoose.model('Event', eventSchema);
 const ParkingLog = mongoose.model('ParkingLog', parkingLogSchema);
 const Transaction = mongoose.model('Transaction', transactionSchema);
 
-// ====== HELPER FUNCTIONS ======
-
-// ✅ Helper function để xử lý Date an toàn
-function safeFormatDate(dateValue) {
+// Helper Functions
+const safeFormatDate = (dateValue) => {
     if (!dateValue) return null;
-
     try {
-        if (dateValue instanceof Date) {
-            return dateValue.toISOString();
-        }
-
-        const date = new Date(dateValue);
-        if (isNaN(date.getTime())) {
-            return null;
-        }
-
-        return date.toISOString();
+        const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+        return isNaN(date.getTime()) ? null : date.toISOString();
     } catch (error) {
-        console.error('❌ Lỗi format date:', error);
         return null;
     }
-}
+};
 
-// ✅ Hàm tính giá vé parking
-function calculateParkingFee(timeIn, timeOut, vehicleType = 'CAR_UNDER_9') {
-    try {
-        const diffInMs = timeOut - timeIn;
-        const diffInMinutes = Math.floor(diffInMs / (1000 * 60));
+// Removed fee calculation - only get from database
 
-        let basePrice = 3000;
-        let blockPrice = 2000;
+const mapStatus = {
+    'IN_PROGRESS': 'dang_do', 'COMPLETED': 'da_ra', 'PAID': 'da_thanh_toan',
+    'CASH': 'tien_mat', 'BANK_TRANSFER': 'chuyen_khoan',
+    'PENDING': 'chua_thanh_toan', 'FAILED': 'that_bai'
+};
 
-        switch (vehicleType) {
-            case 'CAR_9_TO_16':
-                basePrice = 5000;
-                blockPrice = 3000;
-                break;
-            case 'MOTORCYCLE':
-                basePrice = 2000;
-                blockPrice = 1000;
-                break;
-            case 'TRUCK':
-            case 'BUS':
-                basePrice = 8000;
-                blockPrice = 5000;
-                break;
-        }
+const formatLog = (log) => ({
+    _id: log._id,
+    bienSoXe: log.event_enter_id?.plate_text || 'N/A',
+    thoiGianVao: safeFormatDate(log.timeIn),
+    thoiGianRa: safeFormatDate(log.timeOut),
+    giaVe: log.fee || 0,
+    trangThai: mapStatus[log.status] || 'dang_do',
+    trangThaiThanhToan: mapStatus[log.paymentStatus] || 'chua_thanh_toan',
+    hinhThucThanhToan: mapStatus[log.paymentMethod] || 'tien_mat',
+    thoiGianThanhToan: safeFormatDate(log.paymentDate),
+    daThanhToan: log.paymentStatus === 'PAID',
+    vehicleType: log.vehicleType || 'CAR_UNDER_9',
+    event_enter_id: log.event_enter_id?._id,
+    event_exit_id: log.event_exit_id?._id
+});
 
-        let fee = basePrice;
-
-        if (diffInMinutes > 30) {
-            const extraBlocks = Math.ceil((diffInMinutes - 30) / 30);
-            fee += extraBlocks * blockPrice;
-        }
-
-        console.log(`💰 Tính giá vé: ${diffInMinutes} phút, loại xe: ${vehicleType} = ${fee}đ`);
-        return fee;
-    } catch (error) {
-        console.error('❌ Lỗi tính giá vé:', error);
-        return 3000;
-    }
-}
-
-// ✅ Hàm map status
-function mapStatusToAndroid(mongoStatus) {
-    switch (mongoStatus) {
-        case 'IN_PROGRESS': return 'dang_do';
-        case 'COMPLETED': return 'da_ra';
-        case 'PAID': return 'da_thanh_toan';
-        default: return 'dang_do';
-    }
-}
-
-function mapPaymentMethodToAndroid(method) {
-    switch (method) {
-        case 'CASH': return 'tien_mat';
-        case 'BANK_TRANSFER': return 'chuyen_khoan';
-        default: return 'tien_mat';
-    }
-}
-
-function mapPaymentStatusToAndroid(status) {
-    switch (status) {
-        case 'PAID': return 'da_thanh_toan';
-        case 'PENDING': return 'chua_thanh_toan';
-        case 'FAILED': return 'that_bai';
-        default: return 'chua_thanh_toan';
-    }
-}
-
-// ====== WEBSOCKET HANDLING ======
+// WebSocket
 let connectedClients = new Set();
-
 io.on('connection', (socket) => {
-    console.log('📱 Client connected:', socket.id);
     connectedClients.add(socket.id);
 
     socket.on('request-payment-list', async () => {
@@ -221,538 +102,334 @@ io.on('connection', (socket) => {
             const needPaymentLogs = await ParkingLog.find({
                 status: 'COMPLETED',
                 paymentStatus: { $in: ['PENDING', null] }
-            })
-                .populate('event_enter_id')
-                .populate('event_exit_id')
-                .sort({ timeOut: -1 })
-                .lean();
+            }).populate('event_enter_id').populate('event_exit_id').sort({ timeOut: -1 }).lean();
 
             const vehicles = needPaymentLogs.map(log => ({
                 _id: log._id,
-                bienSoXe: log.plate_text || 'N/A',
+                bienSoXe: log.event_enter_id?.plate_text || 'N/A',
                 thoiGianVao: safeFormatDate(log.timeIn),
                 thoiGianRa: safeFormatDate(log.timeOut) || safeFormatDate(new Date()),
-                giaVe: log.fee || calculateParkingFee(log.timeIn, log.timeOut || new Date(), log.vehicleType),
+                giaVe: log.fee || 0,
                 trangThaiThanhToan: 'chua_thanh_toan',
                 vehicleType: log.vehicleType || 'CAR_UNDER_9'
             }));
 
-            socket.emit('payment-list-updated', {
-                success: true,
-                data: vehicles
-            });
+            socket.emit('payment-list-updated', { success: true, data: vehicles });
         } catch (error) {
-            console.error('Error getting payment list:', error);
-            socket.emit('payment-list-error', {
-                success: false,
-                message: error.message
-            });
+            socket.emit('payment-list-error', { success: false, message: error.message });
         }
     });
 
-    socket.on('disconnect', () => {
-        console.log('📱 Client disconnected:', socket.id);
-        connectedClients.delete(socket.id);
-    });
+    socket.on('disconnect', () => connectedClients.delete(socket.id));
 });
 
-// ====== API ROUTES ======
+// API Routes
+app.get('/', (req, res) => res.json({
+    message: '🚀 Server Bãi Đỗ Xe Ô Tô',
+    version: '4.3.0',
+    vehicle_types: ['CAR_UNDER_9 (Xe dưới 9 chỗ)', 'CAR_9_TO_16 (Xe 9-16 chỗ)'],
+    pricing: 'Giá vé được lấy từ database, không tự động tính toán'
+}));
 
-// ✅ Route mặc định
-app.get('/', (req, res) => {
-    res.json({
-        message: '🚀 Server Parking đang chạy...',
-        version: '4.0.0',
-        database_structure: 'Using events collection for plate_text',
-        endpoints: [
-            'GET /api/test',
-            'GET /api/activities',
-            'GET /api/vehicles/need-payment',
-            'GET /api/activities/license/:plateNumber',
-            'PUT /api/activities/:id',
-            'GET /api/transactions',
-            'POST /api/print',
-            'GET /api/events',
-            'POST /api/events/process'
-        ]
-    });
-});
+app.get('/api/test', (req, res) => res.json({
+    success: true,
+    message: 'Server hoạt động bình thường',
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
+}));
 
-// ✅ API: Test endpoint
-app.get('/api/test', (req, res) => {
-    res.json({
-        success: true,
-        message: 'Server hoạt động bình thường',
-        timestamp: new Date().toISOString(),
-        database: mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'
-    });
-});
-
-// ✅ API: Lấy tất cả activities từ parking_logs
+// Get all activities
 app.get('/api/activities', async (req, res) => {
     try {
-        console.log('📋 Lấy tất cả parking logs');
-        const logs = await ParkingLog.find({})
-            .populate('event_enter_id')
-            .populate('event_exit_id')
-            .sort({ timeIn: -1 })
-            .lean();
-
-        const activities = logs.map(log => ({
-            _id: log._id,
-            bienSoXe: log.plate_text || 'N/A',
-            thoiGianVao: safeFormatDate(log.timeIn),
-            thoiGianRa: safeFormatDate(log.timeOut),
-            giaVe: log.fee || 0,
-            trangThai: mapStatusToAndroid(log.status),
-            trangThaiThanhToan: mapPaymentStatusToAndroid(log.paymentStatus || 'PENDING'),
-            hinhThucThanhToan: mapPaymentMethodToAndroid(log.paymentMethod || 'CASH'),
-            thoiGianThanhToan: safeFormatDate(log.paymentDate),
-            daThanhToan: log.paymentStatus === 'PAID',
-            vehicleType: log.vehicleType || 'CAR_UNDER_9',
-            event_enter_id: log.event_enter_id ? log.event_enter_id._id : null,
-            event_exit_id: log.event_exit_id ? log.event_exit_id._id : null
-        }));
-
-        res.json({
-            success: true,
-            data: activities,
-            message: `Tìm thấy ${activities.length} hoạt động`,
-            timestamp: new Date().toISOString()
-        });
+        const logs = await ParkingLog.find({}).populate('event_enter_id').populate('event_exit_id').sort({ timeIn: -1 }).lean();
+        res.json({ success: true, data: logs.map(formatLog), message: `Tìm thấy ${logs.length} hoạt động` });
     } catch (err) {
-        console.error('❌ Lỗi khi lấy activities:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi server khi lấy activities: ' + err.message
-        });
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
     }
 });
 
-// ✅ API: Lấy xe cần thanh toán
+// Get vehicles need payment
 app.get('/api/vehicles/need-payment', async (req, res) => {
     try {
-        console.log('🔍 Tìm xe cần thanh toán');
-
-        const needPaymentLogs = await ParkingLog.find({
+        const logs = await ParkingLog.find({
             status: 'COMPLETED',
             paymentStatus: { $in: ['PENDING', null] }
-        })
-            .populate('event_enter_id')
-            .populate('event_exit_id')
-            .sort({ timeOut: -1 })
-            .lean();
+        }).populate('event_enter_id').populate('event_exit_id').sort({ timeOut: -1 }).lean();
 
-        if (needPaymentLogs.length === 0) {
-            return res.json({
-                success: true,
-                data: [],
-                message: 'Không có xe nào cần thanh toán',
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        const vehicles = needPaymentLogs.map(log => {
-            let giaVe = log.fee;
-            if (!giaVe && log.timeOut) {
-                giaVe = calculateParkingFee(log.timeIn, log.timeOut, log.vehicleType);
-            }
-
-            return {
-                _id: log._id,
-                bienSoXe: log.plate_text || 'N/A',
-                thoiGianVao: safeFormatDate(log.timeIn),
-                thoiGianRa: safeFormatDate(log.timeOut) || safeFormatDate(new Date()),
-                giaVe: giaVe || 3000,
-                trangThai: 'da_ra',
-                trangThaiThanhToan: 'chua_thanh_toan',
-                hinhThucThanhToan: mapPaymentMethodToAndroid(log.paymentMethod || 'CASH'),
-                daThanhToan: false,
-                vehicleType: log.vehicleType || 'CAR_UNDER_9',
-                event_enter_id: log.event_enter_id ? log.event_enter_id._id : null,
-                event_exit_id: log.event_exit_id ? log.event_exit_id._id : null
-            };
+        const vehicles = logs.map(log => {
+            return { ...formatLog(log), giaVe: log.fee || 0, trangThai: 'da_ra', trangThaiThanhToan: 'chua_thanh_toan', daThanhToan: false };
         });
 
-        // Cập nhật fee nếu chưa có
-        for (let i = 0; i < needPaymentLogs.length; i++) {
-            if (!needPaymentLogs[i].fee && vehicles[i].giaVe) {
-                await ParkingLog.findByIdAndUpdate(needPaymentLogs[i]._id, {
-                    fee: vehicles[i].giaVe
-                });
-            }
-        }
-
-        console.log(`✅ Tìm thấy ${vehicles.length} xe cần thanh toán`);
-
-        res.json({
-            success: true,
-            data: vehicles,
-            message: `Tìm thấy ${vehicles.length} xe cần thanh toán`,
-            timestamp: new Date().toISOString()
-        });
-
+        res.json({ success: true, data: vehicles, message: `${vehicles.length} xe cần thanh toán` });
     } catch (err) {
-        console.error('❌ Lỗi khi lấy xe cần thanh toán:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi server khi lấy xe cần thanh toán: ' + err.message
-        });
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
     }
 });
 
-// ✅ API: Lấy thông tin xe theo biển số từ events
+// Get vehicle by plate number
 app.get('/api/activities/license/:plateNumber', async (req, res) => {
     try {
         const { plateNumber } = req.params;
-        console.log('🔍 Tìm xe theo biển số từ events:', plateNumber);
+        const enterEvent = await Event.findOne({ plate_text: plateNumber, event_type: 'enter' }).sort({ timestamp: -1 }).lean();
 
-        // Tìm parking log theo plate_text
+        if (!enterEvent) return res.status(404).json({ success: false, message: 'Không tìm thấy xe' });
+
         const parkingLog = await ParkingLog.findOne({
-            plate_text: plateNumber,
-            $or: [
-                { paymentStatus: 'PENDING' },
-                { paymentStatus: { $exists: false } },
-                { status: { $in: ['IN_PROGRESS', 'COMPLETED'] } }
-            ]
-        })
-            .sort({ timeIn: -1 })
-            .populate('event_enter_id')
-            .populate('event_exit_id')
-            .lean();
+            event_enter_id: enterEvent._id,
+            $or: [{ paymentStatus: 'PENDING' }, { paymentStatus: { $exists: false } }, { status: { $in: ['IN_PROGRESS', 'COMPLETED'] } }]
+        }).sort({ timeIn: -1 }).populate('event_enter_id').populate('event_exit_id').lean();
 
-        if (!parkingLog) {
-            return res.status(404).json({
-                success: false,
-                message: 'Không tìm thấy thông tin đậu xe hoặc xe đã thanh toán'
-            });
-        }
+        if (!parkingLog) return res.status(404).json({ success: false, message: 'Xe đã thanh toán hoặc không có thông tin' });
 
-        // Cập nhật timeOut và status nếu cần
         let timeOut = parkingLog.timeOut;
         if (!timeOut && parkingLog.status === 'IN_PROGRESS') {
             timeOut = new Date();
-            await ParkingLog.findByIdAndUpdate(parkingLog._id, {
-                timeOut: timeOut,
-                status: 'COMPLETED'
-            });
+            await ParkingLog.findByIdAndUpdate(parkingLog._id, { timeOut, status: 'COMPLETED' });
         }
 
-        // Tính fee nếu chưa có
-        let calculatedFee = parkingLog.fee;
-        if (!calculatedFee && timeOut) {
-            calculatedFee = calculateParkingFee(parkingLog.timeIn, timeOut, parkingLog.vehicleType);
-            await ParkingLog.findByIdAndUpdate(parkingLog._id, {
-                fee: calculatedFee
-            });
-        }
-
-        const result = {
-            _id: parkingLog._id,
-            bienSoXe: parkingLog.plate_text,
-            thoiGianVao: safeFormatDate(parkingLog.timeIn),
-            thoiGianRa: safeFormatDate(timeOut),
-            giaVe: calculatedFee || parkingLog.fee || 0,
-            trangThai: mapStatusToAndroid(parkingLog.status === 'IN_PROGRESS' && timeOut ? 'COMPLETED' : parkingLog.status),
-            trangThaiThanhToan: mapPaymentStatusToAndroid(parkingLog.paymentStatus),
-            hinhThucThanhToan: mapPaymentMethodToAndroid(parkingLog.paymentMethod),
-            thoiGianThanhToan: safeFormatDate(parkingLog.paymentDate),
-            daThanhToan: parkingLog.paymentStatus === 'PAID',
-            vehicleType: parkingLog.vehicleType || 'CAR_UNDER_9',
-            event_enter_id: parkingLog.event_enter_id ? parkingLog.event_enter_id._id : null,
-            event_exit_id: parkingLog.event_exit_id ? parkingLog.event_exit_id._id : null
-        };
-
-        console.log('✅ Tìm thấy xe:', parkingLog.plate_text);
-
-        res.json({
-            success: true,
-            data: result,
-            message: 'Tìm thấy thông tin xe'
-        });
-
+        res.json({ success: true, data: { ...formatLog({ ...parkingLog, timeOut }) } });
     } catch (err) {
-        console.error('❌ Lỗi khi lấy thông tin xe:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi server khi lấy thông tin xe: ' + err.message
-        });
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
     }
 });
 
-// ✅ API: Cập nhật activity (parking log)
+// Update activity
 app.put('/api/activities/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const updateData = req.body;
+        const mongoUpdate = {};
 
-        console.log('🔄 Cập nhật activity:', id, updateData);
-
-        // Map Android fields to MongoDB fields
-        const mongoUpdateData = {};
-
-        if (updateData.thoiGianRa) mongoUpdateData.timeOut = new Date(updateData.thoiGianRa);
-        if (updateData.giaVe) mongoUpdateData.fee = updateData.giaVe;
-        if (updateData.trangThai === 'da_ra') mongoUpdateData.status = 'COMPLETED';
+        if (updateData.thoiGianRa) mongoUpdate.timeOut = new Date(updateData.thoiGianRa);
+        if (updateData.giaVe) mongoUpdate.fee = updateData.giaVe;
+        if (updateData.trangThai === 'da_ra') mongoUpdate.status = 'COMPLETED';
         if (updateData.trangThai === 'da_thanh_toan') {
-            mongoUpdateData.status = 'PAID';
-            mongoUpdateData.paymentStatus = 'PAID';
+            mongoUpdate.status = 'PAID';
+            mongoUpdate.paymentStatus = 'PAID';
         }
-
         if (updateData.hinhThucThanhToan) {
-            mongoUpdateData.paymentMethod = updateData.hinhThucThanhToan === 'tien_mat' ? 'CASH' : 'BANK_TRANSFER';
+            mongoUpdate.paymentMethod = updateData.hinhThucThanhToan === 'tien_mat' ? 'CASH' : 'BANK_TRANSFER';
         }
-
         if (updateData.trangThaiThanhToan === 'da_thanh_toan') {
-            mongoUpdateData.paymentStatus = 'PAID';
-            mongoUpdateData.paymentDate = new Date();
+            mongoUpdate.paymentStatus = 'PAID';
+            mongoUpdate.paymentDate = new Date();
         }
+        if (updateData.vehicleType) mongoUpdate.vehicleType = updateData.vehicleType;
 
-        if (updateData.vehicleType) {
-            mongoUpdateData.vehicleType = updateData.vehicleType;
-        }
+        const updatedLog = await ParkingLog.findByIdAndUpdate(id, mongoUpdate, { new: true })
+            .populate('event_enter_id').populate('event_exit_id').lean();
 
-        const updatedLog = await ParkingLog.findByIdAndUpdate(
-            id,
-            mongoUpdateData,
-            { new: true }
-        )
-            .populate('event_enter_id')
-            .populate('event_exit_id')
-            .lean();
+        if (!updatedLog) return res.status(404).json({ success: false, message: 'Không tìm thấy activity' });
 
-        if (!updatedLog) {
-            return res.status(404).json({
-                success: false,
-                message: 'Không tìm thấy activity'
-            });
-        }
-
-        // Tạo transaction nếu đã thanh toán
-        if (mongoUpdateData.paymentStatus === 'PAID') {
-            const transaction = new Transaction({
+        if (mongoUpdate.paymentStatus === 'PAID') {
+            await new Transaction({
                 log: updatedLog._id,
                 amount: updatedLog.fee,
                 method: updatedLog.paymentMethod,
                 status: 'PAID'
-            });
-            await transaction.save();
+            }).save();
         }
 
-        console.log('✅ Cập nhật activity thành công');
-
-        res.json({
-            success: true,
-            data: {
-                _id: updatedLog._id,
-                bienSoXe: updatedLog.plate_text || 'N/A',
-                thoiGianVao: safeFormatDate(updatedLog.timeIn),
-                thoiGianRa: safeFormatDate(updatedLog.timeOut),
-                giaVe: updatedLog.fee || 0,
-                trangThai: mapStatusToAndroid(updatedLog.status),
-                trangThaiThanhToan: mapPaymentStatusToAndroid(updatedLog.paymentStatus),
-                hinhThucThanhToan: mapPaymentMethodToAndroid(updatedLog.paymentMethod),
-                thoiGianThanhToan: safeFormatDate(updatedLog.paymentDate),
-                daThanhToan: updatedLog.paymentStatus === 'PAID',
-                vehicleType: updatedLog.vehicleType || 'CAR_UNDER_9',
-                event_enter_id: updatedLog.event_enter_id ? updatedLog.event_enter_id._id : null,
-                event_exit_id: updatedLog.event_exit_id ? updatedLog.event_exit_id._id : null
-            },
-            message: 'Cập nhật thành công'
-        });
-
+        res.json({ success: true, data: formatLog(updatedLog), message: 'Cập nhật thành công' });
     } catch (err) {
-        console.error('❌ Lỗi khi cập nhật activity:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi server: ' + err.message
-        });
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
     }
 });
 
-// ✅ API: Lấy tất cả transactions
+// Get all transactions
 app.get('/api/transactions', async (req, res) => {
     try {
-        console.log('💰 Lấy tất cả transactions');
-
         const transactions = await Transaction.find({})
-            .populate({
-                path: 'log',
-                populate: [
-                    { path: 'event_enter_id' },
-                    { path: 'event_exit_id' }
-                ]
-            })
-            .sort({ paidAt: -1 })
-            .lean();
+            .populate({ path: 'log', populate: [{ path: 'event_enter_id' }, { path: 'event_exit_id' }] })
+            .sort({ paidAt: -1 }).lean();
 
-        const formattedTransactions = transactions.map(transaction => ({
-            _id: transaction._id,
-            amount: transaction.amount,
-            method: mapPaymentMethodToAndroid(transaction.method),
-            status: mapPaymentStatusToAndroid(transaction.status),
-            paidAt: safeFormatDate(transaction.paidAt),
-            log: transaction.log ? {
-                _id: transaction.log._id,
-                bienSoXe: transaction.log.plate_text || 'N/A',
-                vehicleType: transaction.log.vehicleType || 'CAR_UNDER_9',
-                thoiGianVao: safeFormatDate(transaction.log.timeIn),
-                thoiGianRa: safeFormatDate(transaction.log.timeOut),
-                trangThai: mapStatusToAndroid(transaction.log.status),
-                fee: transaction.log.fee
+        const formatted = transactions.map(t => ({
+            _id: t._id,
+            amount: t.amount,
+            method: mapStatus[t.method],
+            status: mapStatus[t.status],
+            paidAt: safeFormatDate(t.paidAt),
+            log: t.log ? {
+                _id: t.log._id,
+                bienSoXe: t.log.event_enter_id?.plate_text || 'N/A',
+                vehicleType: t.log.vehicleType || 'CAR_UNDER_9',
+                thoiGianVao: safeFormatDate(t.log.timeIn),
+                thoiGianRa: safeFormatDate(t.log.timeOut),
+                trangThai: mapStatus[t.log.status],
+                fee: t.log.fee
             } : null
         }));
 
-        res.json({
-            success: true,
-            data: formattedTransactions,
-            message: `Tìm thấy ${formattedTransactions.length} giao dịch`,
-            timestamp: new Date().toISOString()
-        });
-
+        res.json({ success: true, data: formatted, message: `${formatted.length} giao dịch` });
     } catch (err) {
-        console.error('❌ Lỗi khi lấy transactions:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi server khi lấy transactions: ' + err.message
-        });
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
     }
 });
 
-// ✅ API: Print invoice
-app.post('/api/print', async (req, res) => {
-    try {
-        const printData = req.body;
-        console.log('🖨️ Nhận lệnh in hóa đơn:', printData);
-
-        res.json({
-            success: true,
-            message: 'Lệnh in hóa đơn đã được xử lý',
-            data: {
-                printId: Date.now(),
-                timestamp: new Date().toISOString()
-            }
-        });
-
-    } catch (err) {
-        console.error('❌ Lỗi khi xử lý lệnh in:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi xử lý lệnh in: ' + err.message
-        });
-    }
+// Print invoice
+app.post('/api/print', (req, res) => {
+    res.json({ success: true, message: 'Lệnh in hóa đơn đã được xử lý', data: { printId: Date.now() } });
 });
 
-// ✅ API: Lấy tất cả events
+// Get all events
 app.get('/api/events', async (req, res) => {
     try {
-        console.log('📋 Lấy tất cả events');
-
-        const events = await Event.find({})
-            .sort({ timestamp: -1 })
-            .lean();
-
-        res.json({
-            success: true,
-            data: events,
-            message: `Tìm thấy ${events.length} events`,
-            timestamp: new Date().toISOString()
-        });
+        const events = await Event.find({}).sort({ timestamp: -1 }).lean();
+        res.json({ success: true, data: events, message: `${events.length} events` });
     } catch (err) {
-        console.error('❌ Lỗi khi lấy events:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi server khi lấy events: ' + err.message
-        });
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
     }
 });
 
-// ✅ API: Xử lý events để tạo parking logs
+// Get enter plates
+app.get('/api/events/enter-plates', async (req, res) => {
+    try {
+        const events = await Event.find({ event_type: 'enter' })
+            .select('plate_text timestamp camera_id spot_name location_name vehicle_id vehicleType processed')
+            .sort({ timestamp: -1 }).lean();
+
+        const plates = events.map(e => ({
+            _id: e._id,
+            bienSoXe: e.plate_text,
+            thoiGianVao: safeFormatDate(e.timestamp),
+            camera_id: e.camera_id,
+            spot_name: e.spot_name,
+            location_name: e.location_name,
+            vehicle_id: e.vehicle_id,
+            vehicleType: e.vehicleType || 'CAR_UNDER_9',
+            processed: e.processed || false
+        }));
+
+        res.json({ success: true, data: plates, message: `${plates.length} xe vào bãi` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
+    }
+});
+
+// Process events
 app.post('/api/events/process', async (req, res) => {
     try {
-        console.log('🔄 Xử lý events để tạo parking logs');
-
-        // Tìm tất cả events chưa được xử lý
-        const unprocessedEvents = await Event.find({ processed: false })
-            .sort({ timestamp: 1 })
-            .lean();
-
-        let processedCount = 0;
-        let createdLogs = 0;
+        const unprocessedEvents = await Event.find({ processed: false }).sort({ timestamp: 1 }).lean();
+        let processedCount = 0, createdLogs = 0;
 
         for (const event of unprocessedEvents) {
             try {
                 if (event.event_type === 'enter') {
-                    // Tạo parking log mới cho event vào
-                    const newLog = new ParkingLog({
+                    await new ParkingLog({
                         event_enter_id: event._id,
-                        plate_text: event.plate_text,
                         timeIn: event.timestamp,
                         status: 'IN_PROGRESS',
                         vehicleType: event.vehicleType || 'CAR_UNDER_9'
-                    });
-
-                    await newLog.save();
+                    }).save();
                     createdLogs++;
-                    console.log(`✅ Tạo parking log cho xe vào: ${event.plate_text}`);
-
                 } else if (event.event_type === 'exit') {
-                    // Tìm parking log chưa hoàn thành cho xe này
-                    const activeLog = await ParkingLog.findOne({
-                        plate_text: event.plate_text,
-                        status: 'IN_PROGRESS'
-                    }).sort({ timeIn: -1 });
+                    const activeLog = await ParkingLog.findOne({ status: 'IN_PROGRESS' })
+                        .populate('event_enter_id').sort({ timeIn: -1 });
 
-                    if (activeLog) {
-                        // Cập nhật parking log với thông tin xe ra
-                        const fee = calculateParkingFee(activeLog.timeIn, event.timestamp, activeLog.vehicleType);
-
+                    if (activeLog && activeLog.event_enter_id?.plate_text === event.plate_text) {
                         await ParkingLog.findByIdAndUpdate(activeLog._id, {
                             event_exit_id: event._id,
                             timeOut: event.timestamp,
-                            status: 'COMPLETED',
-                            fee: fee
+                            status: 'COMPLETED'
                         });
-
-                        console.log(`✅ Cập nhật parking log cho xe ra: ${event.plate_text}, fee: ${fee}`);
-                    } else {
-                        console.log(`⚠️ Không tìm thấy parking log IN_PROGRESS cho xe: ${event.plate_text}`);
                     }
                 }
 
-                // Đánh dấu event đã được xử lý
                 await Event.findByIdAndUpdate(event._id, { processed: true });
                 processedCount++;
-
             } catch (eventError) {
-                console.error(`❌ Lỗi xử lý event ${event._id}:`, eventError);
+                console.error(`Lỗi xử lý event ${event._id}:`, eventError);
             }
         }
 
         res.json({
             success: true,
-            data: {
-                processedEvents: processedCount,
-                createdLogs: createdLogs
-            },
-            message: `Đã xử lý ${processedCount} events, tạo ${createdLogs} parking logs mới`,
-            timestamp: new Date().toISOString()
+            data: { processedEvents: processedCount, createdLogs },
+            message: `Xử lý ${processedCount} events, tạo ${createdLogs} parking logs`
         });
-
     } catch (err) {
-        console.error('❌ Lỗi khi xử lý events:', err);
-        res.status(500).json({
-            success: false,
-            message: 'Lỗi server khi xử lý events: ' + err.message
-        });
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
     }
 });
 
-// ✅ Khởi động server
+// Recent activities for Android
+app.get('/api/recent-activities', async (req, res) => {
+    try {
+        const limit = parseInt(req.query.limit) || 20;
+        const events = await Event.find({}).sort({ timestamp: -1 }).limit(limit * 2).lean();
+        const activities = [];
+
+        for (const event of events) {
+            let activity = {
+                plateNumber: event.plate_text,
+                time: new Date(event.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false }),
+                action: event.event_type === 'enter' ? 'IN' : 'OUT',
+                fee: 0,
+                timestamp: event.timestamp.getTime(),
+                _id: event._id.toString()
+            };
+
+            if (event.event_type === 'exit') {
+                const parkingLog = await ParkingLog.findOne({ event_exit_id: event._id }).populate('event_enter_id').lean();
+                if (parkingLog?.event_enter_id) {
+                    activity.fee = parkingLog.fee || 0;
+                }
+            }
+
+            activities.push(activity);
+            if (activities.length >= limit) break;
+        }
+
+        res.json({ success: true, data: activities, message: `${activities.length} hoạt động gần đây` });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
+    }
+});
+
+// Dashboard stats
+app.get('/api/dashboard-stats', async (req, res) => {
+    try {
+        const carsParked = await ParkingLog.countDocuments({ status: 'IN_PROGRESS' });
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const todayCars = await ParkingLog.countDocuments({ timeIn: { $gte: today, $lt: tomorrow } });
+
+        const todayRevenue = await Transaction.aggregate([
+            { $match: { paidAt: { $gte: today, $lt: tomorrow }, status: 'PAID' } },
+            { $group: { _id: null, total: { $sum: '$amount' } } }
+        ]);
+
+        const totalSpots = 50;
+        const stats = {
+            availableSpots: Math.max(0, totalSpots - carsParked),
+            carsParked,
+            todayCars,
+            todayRevenue: todayRevenue.length > 0 ? todayRevenue[0].total : 0,
+            totalSpots
+        };
+
+        res.json({ success: true, data: stats, message: 'Thống kê thành công' });
+    } catch (err) {
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + err.message });
+    }
+});
+
+// WebSocket status
+app.get('/api/realtime-status', (req, res) => {
+    res.json({
+        success: true,
+        websocket_url: `ws://localhost:${PORT}`,
+        connected_clients: connectedClients.size,
+        message: 'WebSocket server đang hoạt động'
+    });
+});
+
+// Start server
 server.listen(PORT, () => {
-    console.log(`🚀 Server đang chạy tại http://localhost:${PORT}`);
-    console.log(`📡 API endpoint: http://localhost:${PORT}/api`);
-    console.log(`🔌 WebSocket ready for real-time updates`);
-    console.log(`🧹 Using events collection for plate_text data`);
-    console.log(`📊 Events -> ParkingLogs workflow enabled`);
+    console.log(`🚀 Server Bãi Đỗ Xe Ô Tô chạy tại http://localhost:${PORT}`);
+    console.log(`📡 API: http://localhost:${PORT}/api`);
 });

@@ -4,6 +4,7 @@ public class xera {
     private String vehicle;
     private String timeIn;
     private String timeOut;
+    private String exitTimestamp;
 
     public xera() {
     }
@@ -38,12 +39,25 @@ public class xera {
         this.timeOut = timeOut;
     }
 
+    public String getExitTimestamp() {
+        return exitTimestamp;
+    }
+
+    public void setExitTimestamp(String exitTimestamp) {
+        this.exitTimestamp = exitTimestamp;
+    }
+
     @Override
     public String toString() {
         return "xera{" +
                 "vehicle='" + vehicle + '\'' +
                 ", timeIn='" + timeIn + '\'' +
                 ", timeOut='" + timeOut + '\'' +
+                ", exitTimestamp='" + exitTimestamp + '\'' +
                 '}';
+    }
+
+    public String getPlateText() {
+        return vehicle;
     }
 }

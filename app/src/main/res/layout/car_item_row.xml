@@ -7,20 +7,11 @@
     android:padding="12dp"
     android:layout_marginBottom="2dp">
 
-    <!-- Ảnh xe -->
-    <ImageView
-        android:id="@+id/imagePlate"
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="1.5"
-        android:scaleType="centerCrop"
-        android:background="#E0E0E0"
-        android:contentDescription="Ảnh xe" />
 
     <!-- Biển số -->
     <TextView
         android:id="@+id/textPlate"
-        android:layout_width="0dp"
+        android:layout_width="66dp"
         android:layout_height="match_parent"
         android:layout_weight="1.5"
         android:gravity="center"
@@ -32,7 +23,7 @@
     <!-- Giờ vào -->
     <TextView
         android:id="@+id/textTimeIn"
-        android:layout_width="0dp"
+        android:layout_width="78dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
         android:gravity="center"
@@ -43,7 +34,7 @@
     <!-- Giờ ra -->
     <TextView
         android:id="@+id/textTimeOut"
-        android:layout_width="0dp"
+        android:layout_width="81dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
         android:gravity="center"

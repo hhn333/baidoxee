@@ -87,7 +87,7 @@
 
             <!-- Thống kê tổng quan với card style -->
             <androidx.cardview.widget.CardView
-                android:layout_width="381dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="20dp"
                 app:cardCornerRadius="16dp"
@@ -95,8 +95,8 @@
                 app:cardUseCompatPadding="true">
 
                 <LinearLayout
-                    android:layout_width="363dp"
-                    android:layout_height="312dp"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:padding="20dp">
 
@@ -177,7 +177,7 @@
                         </LinearLayout>
                     </LinearLayout>
 
-                    <!-- Hàng 2: Xe hôm nay và Doanh thu -->
+                    <!-- Hàng 2: Xe hôm nay -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -185,7 +185,7 @@
 
                         <!-- Xe hôm nay -->
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:layout_width="336dp"
                             android:layout_height="wrap_content"
                             android:layout_marginEnd="8dp"
                             android:layout_weight="1"
@@ -213,40 +213,19 @@
                                 android:textSize="14sp" />
                         </LinearLayout>
 
-                        <!-- Doanh thu -->
+                        <!-- Placeholder cho cân đối -->
                         <LinearLayout
                             android:layout_width="0dp"
-                            android:layout_height="match_parent"
+                            android:layout_height="wrap_content"
                             android:layout_marginStart="8dp"
                             android:layout_weight="1"
-                            android:background="#F3E8FF"
-                            android:gravity="center"
-                            android:orientation="vertical"
-                            android:padding="16dp">
-
-                            <TextView
-                                android:id="@+id/tvRevenue"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="8dp"
-                                android:text="90 đ"
-                                android:textColor="#581C87"
-                                android:textSize="24sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="4dp"
-                                android:text="Doanh thu"
-                                android:textColor="#581C87"
-                                android:textSize="14sp" />
+                            android:visibility="invisible">
                         </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Hoạt động gần đây với card style -->
+            <!-- Biểu đồ tròn thay thế Hoạt động gần đây -->
             <androidx.cardview.widget.CardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -257,7 +236,6 @@
                 app:cardUseCompatPadding="true">
 
                 <LinearLayout
-                    android:id="@+id/recentActivityLayout"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
@@ -267,152 +245,131 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginBottom="16dp"
-                        android:text="🕒 Hoạt động gần đây"
+                        android:text="📈 Tình trạng bãi đỗ"
                         android:textColor="#1E293B"
                         android:textSize="18sp"
                         android:textStyle="bold" />
 
-                    <LinearLayout
-                        android:id="@+id/recentActivityContainer"
+                    <!-- Container cho biểu đồ tròn -->
+                    <RelativeLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical">
+                        android:layout_marginBottom="16dp">
 
-                        <!-- Dòng 1: Xe ra - 30A-98765 - 11:20 - 60,000 đ -->
+                        <!-- MPAndroidChart PieChart -->
+                        <com.github.mikephil.charting.charts.PieChart
+                            android:id="@+id/pieChart"
+                            android:layout_width="200dp"
+                            android:layout_height="200dp"
+                            android:layout_centerHorizontal="true" />
+
+                        <!-- Thông tin giữa biểu đồ -->
                         <LinearLayout
-                            android:layout_width="match_parent"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:padding="4dp">
+                            android:layout_centerInParent="true"
+                            android:orientation="vertical"
+                            android:gravity="center">
 
-                            <!-- Cột mũi tên -->
                             <TextView
-                                android:layout_width="0dp"
+                                android:id="@+id/tvTotalSpots"
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="0.5"
-                                android:gravity="center"
-                                android:text="→"
-                                android:textColor="#D32F2F"
-                                android:textSize="20sp"
+                                android:text="13"
+                                android:textColor="#1E293B"
+                                android:textSize="32sp"
                                 android:textStyle="bold" />
 
                             <TextView
-                                android:layout_width="0dp"
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1.5"
-                                android:text="30A-98765"
-                                android:textColor="#D32F2F"
-                                android:textSize="16sp" />
+                                android:text="Tổng chỗ đỗ"
+                                android:textColor="#64748B"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+                    </RelativeLayout>
+
+                    <!-- Chú thích biểu đồ -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center">
+
+                        <!-- Chỗ trống -->
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginEnd="24dp">
+
+                            <View
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:background="#10B981"
+                                android:layout_marginEnd="8dp" />
 
                             <TextView
-                                android:layout_width="0dp"
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="center"
-                                android:text="11:20"
-                                android:textColor="#212121"
-                                android:textSize="16sp" />
+                                android:text="Chỗ trống"
+                                android:textColor="#374151"
+                                android:textSize="14sp" />
 
                             <TextView
-                                android:layout_width="0dp"
+                                android:id="@+id/tvEmptyPercentage"
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="end"
-                                android:text=""
-                                android:textColor="#212121"
-                                android:textSize="16sp" />
+                                android:text="(77%)"
+                                android:textColor="#6B7280"
+                                android:textSize="12sp"
+                                android:layout_marginStart="4dp" />
                         </LinearLayout>
 
-                        <!-- Dòng 2: Xe vào - 29B-55555 - 11:15 -->
+                        <!-- Đã đỗ -->
                         <LinearLayout
-                            android:layout_width="match_parent"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:orientation="horizontal"
-                            android:padding="4dp">
+                            android:gravity="center_vertical">
 
-                            <!-- Cột mũi tên -->
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="0.5"
-                                android:gravity="center"
-                                android:text="←"
-                                android:textColor="#2E7D32"
-                                android:textSize="20sp"
-                                android:textStyle="bold" />
+                            <View
+                                android:layout_width="16dp"
+                                android:layout_height="16dp"
+                                android:background="#EF4444"
+                                android:layout_marginEnd="8dp" />
 
                             <TextView
-                                android:layout_width="0dp"
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1.5"
-                                android:text="29B-55555"
-                                android:textColor="#2E7D32"
-                                android:textSize="16sp" />
+                                android:text="Đã đỗ"
+                                android:textColor="#374151"
+                                android:textSize="14sp" />
 
                             <TextView
-                                android:layout_width="0dp"
+                                android:id="@+id/tvOccupiedPercentage"
+                                android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="center"
-                                android:text="11:15"
-                                android:textColor="#212121"
-                                android:textSize="16sp" />
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="end"
-                                android:text="30,000đ"
-                                android:textColor="#212121"
-                                android:textSize="16sp" />
-                        </LinearLayout>
-
-                        <!-- Dòng 3: Xe ra - 51C-77777 - 11:10 - 30,000 đ -->
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:padding="4dp">
-
-                            <!-- Cột mũi tên -->
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="0.5"
-                                android:gravity="center"
-                                android:text="→"
-                                android:textColor="#D32F2F"
-                                android:textSize="20sp"
-                                android:textStyle="bold" />
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1.5"
-                                android:text="51C-77777"
-                                android:textColor="#D32F2F"
-                                android:textSize="16sp" />
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="center"
-                                android:text="11:10"
-                                android:textColor="#212121"
-                                android:textSize="16sp" />
-
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:gravity="end"
-                                android:text=""
-                                android:textColor="#212121"
-                                android:textSize="16sp" />
+                                android:text="(23%)"
+                                android:textColor="#6B7280"
+                                android:textSize="12sp"
+                                android:layout_marginStart="4dp" />
                         </LinearLayout>
                     </LinearLayout>
+
+                    <!-- Thời gian cập nhật -->
+                    <TextView
+                        android:id="@+id/tvLastUpdate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:layout_marginTop="12dp"
+                        android:text="Cập nhật lúc: 02:44 PM"
+                        android:textColor="#9CA3AF"
+                        android:textSize="12sp"
+                        android:textStyle="italic" />
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 

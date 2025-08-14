@@ -6,14 +6,11 @@ import android.text.TextWatcher;
 import android.util.Log;
 import android.widget.EditText;
 import android.widget.TextView;
-import android.widget.Toast;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-
 import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.NetworkError;
 import com.android.volley.NoConnectionError;
@@ -22,15 +19,11 @@ import com.android.volley.RequestQueue;
 import com.android.volley.ServerError;
 import com.android.volley.TimeoutError;
 import com.android.volley.VolleyError;
-import com.android.volley.toolbox.HttpHeaderParser;
 import com.android.volley.toolbox.JsonArrayRequest;
 import com.android.volley.toolbox.Volley;
 import com.google.android.material.bottomnavigation.BottomNavigationView;
-
 import org.json.JSONArray;
 import org.json.JSONObject;
-
-import java.io.UnsupportedEncodingException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -39,38 +32,58 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
-
+import java.util.Collections;
+import java.util.Comparator;
 import android.content.Intent;
-import android.view.MenuItem;
 
 public class XeraActivity extends AppCompatActivity {
-
-    private static final String TAG = "XeraActivity";
+    private static final String TAG = "XeraActivity", EVENTS_URL = "https://baidoxe.onrender.com/api/events";
 
     private RecyclerView recyclerView;
-    private List<xera> logList;
-    private List<xera> originalLogList;
-    private XeraAdapter adapter;
-    private final String URL = "https://baidoxe.onrender.com/api/transactions";
-    private final String VEHICLES_URL = "https://baidoxe.onrender.com/api/vehicles";
-    private RequestQueue requestQueue;
     private BottomNavigationView bottomNavigationView;
     private EditText etSearchPlate;
     private TextView tvTotalCars;
+    private List<xera> logList, originalLogList;
+    private XeraAdapter adapter;
+    private RequestQueue requestQueue;
 
-    // Cache để lưu thông tin xe theo ID
-    private Map<String, String> vehicleCache = new HashMap<>();
+    // Cache tĩnh để tái sử dụng - tối ưu hiệu suất
+    private static final SimpleDateFormat UTC_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault());
+    private static final SimpleDateFormat UTC_FORMAT_MILLIS = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.getDefault());
+    private static final SimpleDateFormat VN_TIME_FORMAT = new SimpleDateFormat("HH:mm", Locale.getDefault());
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+
+    static {
+        UTC_FORMAT.setTimeZone(TimeZone.getTimeZone("UTC"));
+        UTC_FORMAT_MILLIS.setTimeZone(TimeZone.getTimeZone("UTC"));
+        VN_TIME_FORMAT.setTimeZone(TimeZone.getTimeZone("Asia/Ho_Chi_Minh"));
+        DATE_FORMAT.setTimeZone(TimeZone.getTimeZone("Asia/Ho_Chi_Minh"));
+    }
+
+    // Class đơn giản để sort
+    private static class TripWithTime {
+        xera trip;
+        Date exitTime;
+
+        TripWithTime(xera trip, Date exitTime) {
+            this.trip = trip;
+            this.exitTime = exitTime;
+        }
+    }
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.xera);
 
+        // Khởi tạo views ngay lập tức
         initializeViews();
         initializeNetwork();
         setupBottomNavigation();
         setupSearch();
-        fetchVehicles();
+
+        // Fetch data ngay
+        fetchEvents();
     }
 
     private void initializeViews() {
@@ -80,57 +93,56 @@ public class XeraActivity extends AppCompatActivity {
         tvTotalCars = findViewById(R.id.tvTotalCars);
 
         if (recyclerView == null) {
-            Log.e(TAG, "RecyclerView not found in layout");
-            Toast.makeText(this, "Lỗi: Không tìm thấy RecyclerView", Toast.LENGTH_SHORT).show();
+            Log.e(TAG, "RecyclerView not found");
             return;
         }
 
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
-
         logList = new ArrayList<>();
         originalLogList = new ArrayList<>();
         adapter = new XeraAdapter(logList);
         recyclerView.setAdapter(adapter);
 
-        Log.d(TAG, "Views initialized successfully");
+        // Hiển thị loading
+        if (tvTotalCars != null) {
+            tvTotalCars.setText("Đang tải...");
+        }
+
+        // Tối ưu EditText - tắt hoàn toàn suggestions và autocomplete
+        if (etSearchPlate != null) {
+            // Tắt tất cả các loại suggestions
+            etSearchPlate.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    | android.text.InputType.TYPE_TEXT_VARIATION_FILTER);
+
+            etSearchPlate.setSingleLine(true);
+            etSearchPlate.setMaxLines(1);
+
+            // Tắt autofill
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                etSearchPlate.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO);
+            }
+
+            // Tắt spell check và text prediction
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN) {
+                etSearchPlate.setPrivateImeOptions("nm,com.google.android.inputmethod.latin.noMicrophoneKey");
+            }
+        }
     }
 
     private void initializeNetwork() {
         requestQueue = Volley.newRequestQueue(this);
-        Log.d(TAG, "Network initialized");
     }
 
-    /**
-     * Lấy thông tin tất cả xe để cache biển số theo ID
-     */
-    private void fetchVehicles() {
-        if (this.isDestroyed() || this.isFinishing()) {
-            Log.w(TAG, "Activity is destroyed/finishing, skipping fetchVehicles");
-            return;
-        }
+    private void fetchEvents() {
+        if (isFinishing()) return;
 
-        showLoading("Đang tải thông tin xe...");
-        Log.d(TAG, "Starting to fetch vehicles from: " + VEHICLES_URL);
-
-        JsonArrayRequest request = new JsonArrayRequest(
-                Request.Method.GET,
-                VEHICLES_URL,
-                null,
+        JsonArrayRequest request = new JsonArrayRequest(Request.Method.GET, EVENTS_URL, null,
                 response -> {
-                    Log.d(TAG, "Vehicles response received, length: " + (response != null ? response.length() : "null"));
-                    if (response != null) {
-                        cacheVehicleInfo(response);
-                        fetchLogs(); // Sau khi cache xong thì mới lấy parking logs
-                    } else {
-                        Log.e(TAG, "Vehicle response is null");
-                        fetchLogs(); // Vẫn tiếp tục lấy logs dù không cache được
-                    }
+                    if (response != null && response.length() > 0) parseEvents(response);
+                    else updateUIWithData(new ArrayList<>(), 0);
                 },
-                error -> {
-                    Log.e(TAG, "Error fetching vehicles", error);
-                    showError("Lỗi tải thông tin xe: " + getErrorMessage(error));
-                    fetchLogs(); // Vẫn tiếp tục lấy logs dù có lỗi
-                }
+                this::handleVolleyError
         ) {
             @Override
             public Map<String, String> getHeaders() {
@@ -142,697 +154,345 @@ public class XeraActivity extends AppCompatActivity {
             }
         };
 
-        request.setRetryPolicy(new DefaultRetryPolicy(
-                15000, // 15 seconds timeout
-                2,     // 2 retries
-                DefaultRetryPolicy.DEFAULT_BACKOFF_MULT
-        ));
-
+        // Giảm timeout để phản hồi nhanh hơn
+        request.setRetryPolicy(new DefaultRetryPolicy(5000, 0, DefaultRetryPolicy.DEFAULT_BACKOFF_MULT));
         requestQueue.add(request);
     }
 
-    /**
-     * Cache thông tin xe theo ID để tra cứu nhanh
-     * Improved version with better error handling and logging
-     */
-    private void cacheVehicleInfo(JSONArray vehiclesResponse) {
+    private void parseEvents(JSONArray response) {
         try {
-            vehicleCache.clear();
-            int successCount = 0;
-            int totalCount = vehiclesResponse.length();
+            // Sử dụng HashMap để tìm kiếm nhanh
+            Map<String, EventData> enterEvents = new HashMap<>();
+            Map<String, EventData> exitEvents = new HashMap<>();
 
-            Log.d(TAG, "Starting to cache " + totalCount + " vehicles");
+            // Thu thập events nhanh
+            for (int i = 0; i < response.length(); i++) {
+                JSONObject event = response.getJSONObject(i);
+                if (event == null) continue;
 
-            for (int i = 0; i < totalCount; i++) {
-                try {
-                    JSONObject vehicle = vehiclesResponse.getJSONObject(i);
+                String eventType = event.optString("event_type", "");
+                String plateText = event.optString("plate_text", "");
+                if (!isValidPlateText(plateText)) continue;
 
-                    // Extract vehicle ID
-                    String vehicleId = null;
-                    if (vehicle.has("_id")) {
-                        Object idObj = vehicle.get("_id");
-                        if (idObj instanceof JSONObject) {
-                            vehicleId = extractObjectId((JSONObject) idObj);
-                        } else if (idObj instanceof String) {
-                            vehicleId = (String) idObj;
-                        }
-                    }
+                String timestamp = extractTimestampFromEvent(event);
+                if (!isValidTimeString(timestamp)) continue;
 
-                    // Extract plate number
-                    String plateNumber = null;
-                    if (vehicle.has("plateNumber")) {
-                        plateNumber = vehicle.getString("plateNumber");
-                    } else if (vehicle.has("licensePlate")) {
-                        plateNumber = vehicle.getString("licensePlate");
-                    }
-
-                    // Cache if both ID and plate number are available
-                    if (vehicleId != null && plateNumber != null &&
-                            !plateNumber.isEmpty() && !plateNumber.equals("null")) {
-
-                        vehicleCache.put(vehicleId, plateNumber);
-                        successCount++;
-
-                        Log.d("VehicleCache", String.format("Cached [%d/%d]: ID=%s, Plate=%s",
-                                i + 1, totalCount, vehicleId, plateNumber));
-                    } else {
-                        Log.w("VehicleCache", String.format("Skipped [%d/%d]: ID=%s, Plate=%s",
-                                i + 1, totalCount, vehicleId, plateNumber));
-                    }
-
-                } catch (Exception e) {
-                    Log.e("VehicleCache", "Error processing vehicle at index " + i, e);
+                EventData eventData = new EventData(plateText, timestamp);
+                if ("enter".equals(eventType)) {
+                    enterEvents.put(plateText, eventData);
+                } else if ("exit".equals(eventType)) {
+                    exitEvents.put(plateText, eventData);
                 }
             }
 
-            Log.i(TAG, String.format("Vehicle caching completed: %d/%d successful",
-                    successCount, totalCount));
-
-            // Log cache content for debugging
-            logCacheStatus();
+            // Tạo completed trips nhanh
+            createCompletedTripsOptimized(enterEvents, exitEvents);
 
         } catch (Exception e) {
-            Log.e(TAG, "Error caching vehicle info", e);
-            // Don't clear cache on error, keep what we have
+            Log.e(TAG, "Error parsing events", e);
+            updateUIWithData(new ArrayList<>(), 0);
         }
     }
 
-    /**
-     * Log cache status for debugging
-     */
-    private void logCacheStatus() {
-        Log.i(TAG, "=== CACHE STATUS ===");
-        Log.i(TAG, "Cache size: " + vehicleCache.size());
+    private void createCompletedTripsOptimized(Map<String, EventData> enterEvents, Map<String, EventData> exitEvents) {
+        List<TripWithTime> tripsWithTime = new ArrayList<>();
+        String todayDateString = getTodayDateString();
+        int totalCompleted = 0;
 
-        if (vehicleCache.isEmpty()) {
-            Log.w(TAG, "Cache is empty! This might cause 'Không rõ biển số' issues");
-        } else {
-            Log.i(TAG, "Cache contains " + vehicleCache.size() + " vehicle entries");
+        for (Map.Entry<String, EventData> exitEntry : exitEvents.entrySet()) {
+            String plateText = exitEntry.getKey();
+            EventData exitData = exitEntry.getValue();
+            EventData enterData = enterEvents.get(plateText);
 
-            // Show some examples
-            int count = 0;
-            for (Map.Entry<String, String> entry : vehicleCache.entrySet()) {
-                Log.d(TAG, "  Cache[" + count + "]: " + entry.getKey() + " -> " + entry.getValue());
-                if (++count >= 3) break; // Show first 3 entries
-            }
-        }
-        Log.i(TAG, "==================");
-    }
+            if (enterData != null) {
+                totalCompleted++;
 
-    private void fetchLogs() {
-        if (this.isDestroyed() || this.isFinishing()) {
-            Log.w(TAG, "Activity is destroyed/finishing, skipping fetchLogs");
-            return;
-        }
+                // Chỉ xử lý trips hôm nay
+                if (isTimestampToday(exitData.timestamp, todayDateString)) {
+                    String timeIn = formatToVietnamTime(enterData.timestamp);
+                    String timeOut = formatToVietnamTime(exitData.timestamp);
 
-        // Log cache status before fetching logs
-        logCacheStatus();
+                    xera trip = new xera(plateText, timeIn, timeOut);
+                    trip.setExitTimestamp(exitData.timestamp);
 
-        showLoading("Đang tải dữ liệu xe đã thanh toán...");
-        Log.d(TAG, "Starting to fetch paid transactions from: " + URL);
-
-        JsonArrayRequest request = new JsonArrayRequest(
-                Request.Method.GET,
-                URL,
-                null,
-                response -> {
-                    hideLoading();
-                    Log.d(TAG, "Paid transactions response received, length: " + (response != null ? response.length() : "null"));
-                    if (response != null) {
-                        parseTransactions(response);
-                    } else {
-                        Log.e(TAG, "Response is null");
-                        showError("Dữ liệu trả về trống");
-                    }
-                },
-                error -> {
-                    hideLoading();
-                    Log.e(TAG, "Error fetching paid transactions", error);
-                    handleVolleyError(error);
+                    Date exitTime = parseTimeString(exitData.timestamp);
+                    tripsWithTime.add(new TripWithTime(trip, exitTime));
                 }
-        ) {
-            @Override
-            public Map<String, String> getHeaders() {
-                Map<String, String> headers = new HashMap<>();
-                headers.put("Content-Type", "application/json");
-                headers.put("Accept", "application/json");
-                headers.put("User-Agent", "Android-App");
-                return headers;
             }
+        }
 
-            @Override
-            protected VolleyError parseNetworkError(VolleyError volleyError) {
-                if (volleyError.networkResponse != null && volleyError.networkResponse.data != null) {
-                    try {
-                        String errorString = new String(volleyError.networkResponse.data, HttpHeaderParser.parseCharset(volleyError.networkResponse.headers));
-                        Log.e("VolleyError", "Error response: " + errorString);
-                    } catch (UnsupportedEncodingException e) {
-                        Log.e("VolleyError", "Error parsing error response", e);
-                    }
-                }
-                return super.parseNetworkError(volleyError);
-            }
-        };
+        // Sort nhanh - mới nhất trước
+        Collections.sort(tripsWithTime, (a, b) -> {
+            if (a.exitTime == null && b.exitTime == null) return 0;
+            if (a.exitTime == null) return 1;
+            if (b.exitTime == null) return -1;
+            return b.exitTime.compareTo(a.exitTime);
+        });
 
-        request.setRetryPolicy(new DefaultRetryPolicy(
-                15000,
-                2,
-                DefaultRetryPolicy.DEFAULT_BACKOFF_MULT
-        ));
+        // Chuyển sang list cuối
+        List<xera> finalTripList = new ArrayList<>();
+        for (TripWithTime tripWithTime : tripsWithTime) {
+            finalTripList.add(tripWithTime.trip);
+        }
 
-        requestQueue.add(request);
+        // Update UI với data đã sẵn sàng
+        updateUIWithData(finalTripList, finalTripList.size());
     }
 
-    /**
-     * Parse transactions thay vì parking logs
-     */
-    private void parseTransactions(JSONArray response) {
-        try {
-            if (logList == null) {
-                logList = new ArrayList<>();
-            }
-            if (originalLogList == null) {
-                originalLogList = new ArrayList<>();
-            }
-
+    private void updateUIWithData(List<xera> tripList, int todayTrips) {
+        runOnUiThread(() -> {
             logList.clear();
             originalLogList.clear();
-
-            Log.d(TAG, "Response length: " + response.length());
-            Log.d(TAG, "Raw response preview: " + response.toString().substring(0, Math.min(500, response.toString().length())) + "...");
-
-            int paidTransactionsCount = 0;
-
-            for (int i = 0; i < response.length(); i++) {
-                JSONObject obj = response.getJSONObject(i);
-
-                if (obj == null) {
-                    Log.w(TAG, "Null object at index " + i);
-                    continue;
-                }
-
-                Log.d(TAG, "Processing transaction " + i + ": " + obj.toString());
-
-                // Kiểm tra status = PAID
-                String status = obj.optString("status", "");
-                if (!"PAID".equals(status)) {
-                    Log.d(TAG, "Skipping transaction " + i + " - status is not PAID: " + status);
-                    continue;
-                }
-
-                // Extract vehicle license plate
-                String vehiclePlate = extractVehiclePlateFromTransactionObject(obj);
-
-                // Extract thời gian từ transaction fields
-                String rawTimeIn = extractTimeFromDate(obj, "timeIn");
-                String rawTimeOut = extractTimeFromDate(obj, "timeOut");
-
-                Log.d(TAG, "Transaction " + i + " - Vehicle: " + vehiclePlate);
-                Log.d(TAG, "Raw timeIn: " + rawTimeIn);
-                Log.d(TAG, "Raw timeOut: " + rawTimeOut);
-
-                // Chuyển đổi thời gian theo timezone Việt Nam
-                String timeIn = formatToVietnamTime(rawTimeIn);
-                String timeOut = formatToVietnamTime(rawTimeOut);
-
-                Log.d(TAG, "Formatted timeIn: " + timeIn);
-                Log.d(TAG, "Formatted timeOut: " + timeOut);
-
-                xera log = new xera(vehiclePlate, timeIn, timeOut);
-                logList.add(log);
-                originalLogList.add(log);
-                paidTransactionsCount++;
-            }
+            logList.addAll(tripList);
+            originalLogList.addAll(tripList);
 
             if (adapter != null) {
                 adapter.notifyDataSetChanged();
-                String successMessage = "Tải thành công " + paidTransactionsCount + " giao dịch đã thanh toán";
-                showSuccess(successMessage);
-                Log.i(TAG, successMessage);
+            }
+            if (tvTotalCars != null) {
+                tvTotalCars.setText("Tổng số xe đã ra: " + todayTrips);
+            }
+        });
+    }
 
-                if (tvTotalCars != null) {
-                    tvTotalCars.setText("Tổng số giao dịch đã thanh toán: " + paidTransactionsCount);
-                }
+    private Date parseTimeString(String timeString) {
+        if (!isValidTimeString(timeString)) return null;
+
+        try {
+            String cleaned = cleanTimestamp(timeString);
+
+            // Parse với format phù hợp
+            if (cleaned.contains(".")) {
+                return UTC_FORMAT_MILLIS.parse(cleaned);
             } else {
-                Log.e(TAG, "Adapter is null");
+                return UTC_FORMAT.parse(cleaned);
             }
-
         } catch (Exception e) {
-            String errorMsg = "Lỗi xử lý dữ liệu transactions: " + e.getMessage();
-            showError(errorMsg);
-            Log.e("ParseTransactions", errorMsg, e);
-        }
-    }
-
-    /**
-     * Extract vehicle plate từ transaction object - phiên bản sửa lỗi
-     */
-    private String extractVehiclePlateFromTransactionObject(JSONObject obj) {
-        try {
-            // Method 1: Transaction object có thể có trực tiếp bienSoXe field
-            if (obj.has("bienSoXe")) {
-                String bienSoXe = obj.getString("bienSoXe");
-                if (!bienSoXe.isEmpty() && !bienSoXe.equals("null") && !bienSoXe.equals("N/A")) {
-                    Log.d(TAG, "Found bienSoXe from transaction: " + bienSoXe);
-                    return bienSoXe;
-                }
-            }
-
-            // Method 2: Kiểm tra vehicle object trong transaction
-            if (obj.has("vehicle")) {
-                Object vehicleObj = obj.get("vehicle");
-
-                if (vehicleObj instanceof String) {
-                    // vehicle là string ID, tra cứu từ cache
-                    String vehicleId = (String) vehicleObj;
-                    if (vehicleCache.containsKey(vehicleId)) {
-                        String cachedPlate = vehicleCache.get(vehicleId);
-                        Log.d(TAG, "Found vehicle from cache: " + vehicleId + " -> " + cachedPlate);
-                        return cachedPlate;
-                    } else {
-                        Log.w(TAG, "Vehicle ID not found in cache: " + vehicleId);
-                    }
-                } else if (vehicleObj instanceof JSONObject) {
-                    // vehicle là object, extract trực tiếp
-                    JSONObject vehicle = (JSONObject) vehicleObj;
-                    if (vehicle.has("plateNumber")) {
-                        String plateNumber = vehicle.getString("plateNumber");
-                        if (!plateNumber.isEmpty() && !plateNumber.equals("null")) {
-                            Log.d(TAG, "Found plateNumber from vehicle object: " + plateNumber);
-                            return plateNumber;
-                        }
-                    }
-                    if (vehicle.has("licensePlate")) {
-                        String licensePlate = vehicle.getString("licensePlate");
-                        if (!licensePlate.isEmpty() && !licensePlate.equals("null")) {
-                            Log.d(TAG, "Found licensePlate from vehicle object: " + licensePlate);
-                            return licensePlate;
-                        }
-                    }
-                }
-            }
-
-            // Method 3: Kiểm tra vehicleId field
-            if (obj.has("vehicleId")) {
-                String vehicleId = obj.getString("vehicleId");
-                if (vehicleCache.containsKey(vehicleId)) {
-                    String cachedPlate = vehicleCache.get(vehicleId);
-                    Log.d(TAG, "Found vehicle from cache via vehicleId: " + vehicleId + " -> " + cachedPlate);
-                    return cachedPlate;
-                }
-            }
-
-            Log.w(TAG, "Could not extract vehicle plate from transaction: " + obj.toString());
-            return "Không rõ biển số";
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error extracting vehicle plate from transaction: " + obj.toString(), e);
-            return "Lỗi biển số";
-        }
-    }
-
-    /**
-     * Improved ObjectId extraction with better error handling
-     */
-    private String extractObjectId(JSONObject idObj) {
-        if (idObj == null) {
-            Log.w(TAG, "ID object is null");
-            return null;
-        }
-
-        try {
-            // MongoDB ObjectId format: {"$oid": "string"}
-            if (idObj.has("$oid")) {
-                String oid = idObj.getString("$oid");
-                if (oid != null && !oid.isEmpty() && !oid.equals("null")) {
-                    return oid;
-                }
-            }
-
-            // Alternative format: {"_id": "string"}
-            if (idObj.has("_id")) {
-                String id = idObj.getString("_id");
-                if (id != null && !id.isEmpty() && !id.equals("null")) {
-                    return id;
-                }
-            }
-
-            // Log the actual structure for debugging
-            Log.w(TAG, "Could not extract ObjectId from: " + idObj.toString());
-            return null;
-
-        } catch (Exception e) {
-            Log.e(TAG, "Error extracting ObjectId from: " + idObj.toString(), e);
             return null;
         }
     }
 
-    /**
-     * Extract time string from MongoDB date object
-     */
-    private String extractTimeFromDate(JSONObject obj, String timeField) {
-        try {
-            if (obj.has(timeField)) {
-                Object timeObj = obj.get(timeField);
+    private String cleanTimestamp(String timestamp) {
+        String cleaned = timestamp.trim();
+        if (cleaned.endsWith("Z")) cleaned = cleaned.substring(0, cleaned.length() - 1);
+        else if (cleaned.contains("+") || cleaned.lastIndexOf("-") > 10) {
+            int tzIndex = Math.max(cleaned.lastIndexOf("+"), cleaned.lastIndexOf("-"));
+            if (tzIndex > 10) cleaned = cleaned.substring(0, tzIndex);
+        }
+        if (cleaned.contains(".")) {
+            String[] parts = cleaned.split("\\.");
+            if (parts.length == 2) {
+                String millisPart = parts[1];
+                if (millisPart.length() > 3) millisPart = millisPart.substring(0, 3);
+                else while (millisPart.length() < 3) millisPart += "0";
+                cleaned = parts[0] + "." + millisPart;
+            }
+        }
+        return cleaned;
+    }
 
-                if (timeObj instanceof String) {
-                    return (String) timeObj;
-                } else if (timeObj instanceof JSONObject) {
-                    JSONObject timeJson = (JSONObject) timeObj;
-                    if (timeJson.has("$date")) {
-                        return timeJson.getString("$date");
-                    }
-                }
+    private boolean isValidPlateText(String plateText) {
+        return plateText != null && !plateText.trim().isEmpty() && !plateText.equals("null");
+    }
+
+    private String getTodayDateString() {
+        try {
+            return DATE_FORMAT.format(new Date());
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private boolean isTimestampToday(String timestamp, String todayDateString) {
+        if (!isValidTimeString(timestamp) || todayDateString == null || todayDateString.isEmpty()) return false;
+        try {
+            Date timestampDate = parseTimeString(timestamp);
+            if (timestampDate == null) return false;
+            return todayDateString.equals(DATE_FORMAT.format(timestampDate));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private String extractTimestampFromEvent(JSONObject event) {
+        try {
+            if (event.has("timestamp")) {
+                String timestamp = extractStringFromTimestampObject(event.get("timestamp"));
+                if (timestamp != null) return timestamp;
+            }
+            if (event.has("created_at")) return extractStringFromTimestampObject(event.get("created_at"));
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String extractStringFromTimestampObject(Object timestampObj) {
+        try {
+            if (timestampObj instanceof String) return (String) timestampObj;
+            else if (timestampObj instanceof JSONObject) {
+                JSONObject timestampJson = (JSONObject) timestampObj;
+                if (timestampJson.has("$date")) return timestampJson.getString("$date");
             }
             return null;
         } catch (Exception e) {
-            Log.e(TAG, "Error extracting time from date", e);
             return null;
         }
     }
 
     private boolean isValidTimeString(String timeString) {
-        return timeString != null &&
-                !timeString.isEmpty() &&
-                !timeString.equals("null") &&
-                !timeString.trim().isEmpty();
+        return timeString != null && !timeString.trim().isEmpty() && !timeString.equals("null");
     }
 
-    /**
-     * Format thời gian theo timezone Việt Nam (UTC+7)
-     * Từ dữ liệu MongoDB: "2025-07-30T06:32:21.887Z" -> "13:32" (VN time)
-     */
     private String formatToVietnamTime(String isoTime) {
-        if (!isValidTimeString(isoTime)) {
-            return "--:--";
-        }
-
+        if (!isValidTimeString(isoTime)) return "--:--";
         try {
-            String cleaned = isoTime.trim();
-            Log.d("TimeFormat", "Processing time: " + cleaned);
-
-            // Loại bỏ timezone indicator nếu có
-            if (cleaned.endsWith("Z")) {
-                cleaned = cleaned.substring(0, cleaned.length() - 1);
-            } else if (cleaned.contains("+") || cleaned.lastIndexOf("-") > 10) {
-                int tzIndex = Math.max(cleaned.lastIndexOf("+"), cleaned.lastIndexOf("-"));
-                if (tzIndex > 10) {
-                    cleaned = cleaned.substring(0, tzIndex);
-                }
-            }
-
-            SimpleDateFormat inputFormat;
-
-            // Xử lý milliseconds
-            if (cleaned.contains(".")) {
-                String[] parts = cleaned.split("\\.");
-                if (parts.length == 2) {
-                    String millisPart = parts[1];
-                    // Chuẩn hóa milliseconds về 3 chữ số
-                    if (millisPart.length() > 3) {
-                        millisPart = millisPart.substring(0, 3);
-                    } else {
-                        while (millisPart.length() < 3) {
-                            millisPart += "0";
-                        }
-                    }
-                    cleaned = parts[0] + "." + millisPart;
-                }
-                inputFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.getDefault());
-            } else {
-                inputFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault());
-            }
-
-            // Parse như UTC time
-            inputFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
-            Date utcDate = inputFormat.parse(cleaned);
-
-            if (utcDate == null) {
-                Log.e("TimeFormat", "Parsed date is null for: " + isoTime);
-                return "--:--";
-            }
-
-            // Format thành giờ Việt Nam (UTC+7)
-            SimpleDateFormat vietnamTimeFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
-            vietnamTimeFormat.setTimeZone(TimeZone.getTimeZone("Asia/Ho_Chi_Minh")); // UTC+7
-
-            String vietnamTime = vietnamTimeFormat.format(utcDate);
-            Log.d("TimeFormat", "Converted " + isoTime + " -> " + vietnamTime);
-
-            return vietnamTime;
-
+            Date utcDate = parseTimeString(isoTime);
+            if (utcDate == null) return "--:--";
+            return VN_TIME_FORMAT.format(utcDate);
         } catch (Exception e) {
-            Log.e("TimeFormat", "Lỗi định dạng thời gian: " + isoTime, e);
             return "--:--";
-        }
-    }
-
-    private String getErrorMessage(VolleyError error) {
-        if (error instanceof TimeoutError) {
-            return "Kết nối quá chậm";
-        } else if (error instanceof NoConnectionError) {
-            return "Không có kết nối internet";
-        } else if (error instanceof NetworkError) {
-            return "Mạng không ổn định";
-        } else if (error instanceof ServerError) {
-            if (error.networkResponse != null) {
-                int statusCode = error.networkResponse.statusCode;
-                switch (statusCode) {
-                    case 404: return "API không tìm thấy (404)";
-                    case 500: return "Server nội bộ (500)";
-                    case 503: return "Server đang bảo trì (503)";
-                    default: return "Lỗi server (" + statusCode + ")";
-                }
-            }
-            return "Server không phản hồi";
-        }
-        return "Lỗi không xác định";
-    }
-
-    private void handleVolleyError(VolleyError error) {
-        String errorMessage = getErrorMessage(error);
-
-        if (error.networkResponse != null) {
-            int statusCode = error.networkResponse.statusCode;
-            Log.e("NetworkResponse", "Status code: " + statusCode);
-
-            try {
-                String responseBody = new String(error.networkResponse.data, HttpHeaderParser.parseCharset(error.networkResponse.headers));
-                Log.e("NetworkResponse", "Response body: " + responseBody);
-            } catch (Exception e) {
-                Log.e("NetworkResponse", "Error parsing response body", e);
-            }
-        }
-
-        Log.e("VolleyError", "Error details: " + error.toString(), error);
-        showError("Lỗi: " + errorMessage);
-
-        if (error.getCause() != null) {
-            Log.e("VolleyError", "Cause: " + error.getCause().getMessage());
-        }
-    }
-
-    private void showLoading(String message) {
-        if (!this.isDestroyed() && !this.isFinishing()) {
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-            Log.d(TAG, "Loading: " + message);
-        }
-    }
-
-    private void hideLoading() {
-        // Có thể implement ProgressBar ở đây nếu cần
-        Log.d(TAG, "Loading hidden");
-    }
-
-    private void showError(String message) {
-        if (!this.isDestroyed() && !this.isFinishing()) {
-            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
-            Log.e(TAG, "Error: " + message);
-        }
-    }
-
-    private void showSuccess(String message) {
-        if (!this.isDestroyed() && !this.isFinishing()) {
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
-            Log.i(TAG, "Success: " + message);
-        }
-    }
-
-    private void setupBottomNavigation() {
-        if (bottomNavigationView != null) {
-            bottomNavigationView.setSelectedItemId(R.id.nav_exit);
-
-            bottomNavigationView.setOnItemSelectedListener(new BottomNavigationView.OnItemSelectedListener() {
-                @Override
-                public boolean onNavigationItemSelected(@NonNull MenuItem item) {
-                    int id = item.getItemId();
-
-                    if (id == R.id.nav_home) {
-                        Intent intent = new Intent(XeraActivity.this, TrangChuActivity.class);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(intent);
-                        finish();
-                        return true;
-
-                    } else if (id == R.id.nav_parking) {
-                        Intent intent = new Intent(XeraActivity.this, XeVaoActivity.class);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                        startActivity(intent);
-                        finish();
-                        return true;
-
-                    } else if (id == R.id.nav_exit) {
-                        refreshData();
-                        Toast.makeText(XeraActivity.this, "Đang cập nhật dữ liệu xe ra...", Toast.LENGTH_SHORT).show();
-                        return true;
-
-                    } else if (id == R.id.nav_payment) {
-                        Intent intent = new Intent(XeraActivity.this, ThanhToanActivity.class);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                        startActivity(intent);
-                        finish();
-                        return true;
-                    }
-
-                    return false;
-                }
-            });
-
-            Log.d(TAG, "Bottom navigation setup completed");
-        } else {
-            Log.e(TAG, "BottomNavigationView not found in layout");
-        }
-    }
-
-    private void setupSearch() {
-        if (etSearchPlate != null) {
-            etSearchPlate.addTextChangedListener(new TextWatcher() {
-                @Override
-                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-                    // Not needed
-                }
-
-                @Override
-                public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    filterLogs(s.toString().trim());
-                }
-
-                @Override
-                public void afterTextChanged(Editable s) {
-                    // Not needed
-                }
-            });
-
-            Log.d(TAG, "Search setup completed");
-        } else {
-            Log.e(TAG, "Search EditText not found in layout");
         }
     }
 
     private void filterLogs(String searchText) {
-        if (adapter == null || originalLogList == null) {
-            Log.w(TAG, "Cannot filter - adapter or originalLogList is null");
-            return;
-        }
+        if (adapter == null || originalLogList == null) return;
 
         List<xera> filteredList = new ArrayList<>();
-
         if (searchText.isEmpty()) {
             filteredList.addAll(originalLogList);
-            Log.d(TAG, "Filter cleared, showing all " + filteredList.size() + " logs");
         } else {
+            String lowerSearchText = searchText.toLowerCase();
             for (xera log : originalLogList) {
-                if (log != null && log.getVehicle() != null &&
-                        log.getVehicle().toLowerCase().contains(searchText.toLowerCase())) {
+                if (log != null && log.getPlateText() != null &&
+                        log.getPlateText().toLowerCase().contains(lowerSearchText)) {
                     filteredList.add(log);
                 }
             }
-            Log.d(TAG, "Filtered by '" + searchText + "', found " + filteredList.size() + " matching logs");
         }
 
         logList.clear();
         logList.addAll(filteredList);
         adapter.notifyDataSetChanged();
 
+        // Sửa để đồng bộ với XeVaoActivity - luôn hiện "Tổng số xe đã ra: x"
         if (tvTotalCars != null) {
-            tvTotalCars.setText("Tổng số giao dịch đã thanh toán: " + filteredList.size());
+            tvTotalCars.setText("Tổng số xe đã ra: " + filteredList.size());
+        }
+    }
+    private void setupBottomNavigation() {
+        if (bottomNavigationView == null) return;
+        bottomNavigationView.setSelectedItemId(R.id.nav_exit);
+        bottomNavigationView.setOnItemSelectedListener(item -> {
+            int itemId = item.getItemId();
+            if (itemId == R.id.nav_home) {
+                startActivity(new Intent(this, TrangChuActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK));
+                finish();
+                return true;
+            } else if (itemId == R.id.nav_parking) {
+                startActivity(new Intent(this, XeVaoActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                finish();
+                return true;
+            } else if (itemId == R.id.nav_exit) {
+                return true;
+            } else if (itemId == R.id.nav_payment) {
+                startActivity(new Intent(this, ThanhToanActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                finish();
+                return true;
+            }
+            return false;
+        });
+    }
+
+    private void setupSearch() {
+        if (etSearchPlate != null) {
+            // Đặt lại input type để tắt hoàn toàn suggestions
+            etSearchPlate.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    | android.text.InputType.TYPE_TEXT_VARIATION_FILTER);
+
+            // Chỉ set threshold nếu là AutoCompleteTextView
+            try {
+                if (etSearchPlate instanceof android.widget.AutoCompleteTextView) {
+                    ((android.widget.AutoCompleteTextView) etSearchPlate).setThreshold(Integer.MAX_VALUE);
+                    ((android.widget.AutoCompleteTextView) etSearchPlate).setAdapter(null);
+                }
+            } catch (Exception e) {
+                // Ignore - không phải AutoCompleteTextView
+            }
+
+            etSearchPlate.addTextChangedListener(new TextWatcher() {
+                @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    filterLogs(s.toString().trim());
+                }
+                @Override public void afterTextChanged(Editable s) {}
+            });
         }
     }
 
+    private void handleVolleyError(VolleyError error) {
+        String errorMessage = getErrorMessage(error);
+        Log.e(TAG, "Volley error: " + errorMessage, error);
+
+        runOnUiThread(() -> {
+            if (tvTotalCars != null) {
+                tvTotalCars.setText("Không thể tải dữ liệu");
+            }
+        });
+    }
+
+    private String getErrorMessage(VolleyError error) {
+        if (error instanceof TimeoutError) return "Timeout";
+        if (error instanceof NoConnectionError) return "No connection";
+        if (error instanceof NetworkError) return "Network error";
+        if (error instanceof ServerError) {
+            if (error.networkResponse != null) {
+                return "Server error (" + error.networkResponse.statusCode + ")";
+            }
+            return "Server error";
+        }
+        return "Unknown error";
+    }
+
     public void refreshData() {
-        Log.d(TAG, "Refreshing paid transactions data...");
-        fetchVehicles(); // Refresh cả thông tin xe và transactions
+        fetchEvents();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        Log.d(TAG, "XeraActivity resumed - refreshing paid transactions data");
-        fetchVehicles(); // Refresh khi activity được resume
-    }
-
-    @Override
-    protected void onPause() {
-        super.onPause();
-        Log.d(TAG, "XeraActivity paused");
-    }
-
-    @Override
-    protected void onStop() {
-        super.onStop();
-        Log.d(TAG, "XeraActivity stopped");
+        fetchEvents();
+        // Tắt focus cho EditText khi resume và clear suggestions
+        if (etSearchPlate != null) {
+            etSearchPlate.clearFocus();
+            // Chỉ dismiss dropdown nếu là AutoCompleteTextView
+            try {
+                if (etSearchPlate instanceof android.widget.AutoCompleteTextView) {
+                    ((android.widget.AutoCompleteTextView) etSearchPlate).dismissDropDown();
+                }
+            } catch (Exception e) {
+                // Ignore - không phải AutoCompleteTextView
+            }
+        }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        Log.d(TAG, "XeraActivity destroying - cleaning up resources");
-
-        // Cancel all network requests
         if (requestQueue != null) {
             requestQueue.cancelAll(this);
-            Log.d(TAG, "Cancelled all network requests");
         }
-
-        // Clear data structures
-        if (logList != null) {
-            logList.clear();
-            logList = null;
-        }
-        if (originalLogList != null) {
-            originalLogList.clear();
-            originalLogList = null;
-        }
-        if (vehicleCache != null) {
-            vehicleCache.clear();
-            vehicleCache = null;
-        }
-
-        // Clear adapter reference
-        adapter = null;
-
-        Log.d(TAG, "XeraActivity destroyed - resources cleaned up");
+        if (logList != null) logList.clear();
+        if (originalLogList != null) originalLogList.clear();
     }
 
-    /**
-     * Helper method to validate activity state before operations
-     */
-    private boolean isActivityValid() {
-        return !this.isDestroyed() && !this.isFinishing();
-    }
-
-    /**
-     * Debug method to print current state
-     */
-    private void debugCurrentState() {
-        Log.d(TAG, "=== CURRENT STATE DEBUG ===");
-        Log.d(TAG, "Activity valid: " + isActivityValid());
-        Log.d(TAG, "Cache size: " + (vehicleCache != null ? vehicleCache.size() : "null"));
-        Log.d(TAG, "LogList size: " + (logList != null ? logList.size() : "null"));
-        Log.d(TAG, "OriginalLogList size: " + (originalLogList != null ? originalLogList.size() : "null"));
-        Log.d(TAG, "Adapter: " + (adapter != null ? "exists" : "null"));
-        Log.d(TAG, "RecyclerView: " + (recyclerView != null ? "exists" : "null"));
-        Log.d(TAG, "RequestQueue: " + (requestQueue != null ? "exists" : "null"));
-        Log.d(TAG, "========================");
+    // EventData class đơn giản
+    private static class EventData {
+        String plateText, timestamp;
+        EventData(String plateText, String timestamp) {
+            this.plateText = plateText;
+            this.timestamp = timestamp;
+        }
     }
 }

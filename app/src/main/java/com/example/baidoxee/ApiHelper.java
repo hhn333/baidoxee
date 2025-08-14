@@ -2,18 +2,30 @@ package com.example.baidoxee;
 
 import android.os.AsyncTask;
 import android.util.Log;
+import org.json.JSONObject;
+import org.json.JSONException;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.SocketTimeoutException;
+import java.net.ConnectException;
+import java.net.UnknownHostException;
+import java.io.IOException;
 
 public class ApiHelper {
 
-    // IP address của bạn
-    private static final String BASE_URL = "http://192.168.102.171:3000/api";
+    // Cập nhật IP address đúng
+    private static final String BASE_URL = "http://192.168.1.23:3000/api";
     private static final String TAG = "ApiHelper";
+
+    // Cấu hình timeout
+    private static final int CONNECT_TIMEOUT = 15000; // 15 giây
+    private static final int READ_TIMEOUT = 20000;    // 20 giây
+    private static final int MAX_RETRY_ATTEMPTS = 3;
+    private static int read_TIMEOUT;
 
     // Interface để handle callback
     public interface OnDataReceivedListener {
@@ -26,578 +38,465 @@ public class ApiHelper {
         void onError(String errorMessage);
     }
 
-    // ===== ACTIVITIES ENDPOINTS =====
+    // ===== DASHBOARD ENDPOINTS =====
+    public static void getDashboardStats(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting dashboard statistics from /api/dashboard-stats");
+        makeGetRequest(BASE_URL + "/dashboard-stats", listener);
+    }
 
-    // GET all activities
+    public static void getRecentActivities(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting recent activities from /api/recent-activities");
+        makeGetRequest(BASE_URL + "/recent-activities", listener);
+    }
+
+    public static void getRecentActivitiesWithLimit(int limit, OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting recent activities with limit: " + limit);
+        makeGetRequest(BASE_URL + "/recent-activities?limit=" + limit, listener);
+    }
+
+    public static void getRealtimeStatus(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting realtime WebSocket status");
+        makeGetRequest(BASE_URL + "/realtime-status", listener);
+    }
+
+    // ===== ACTIVITIES ENDPOINTS =====
     public static void getActivities(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting all activities from /api/activities");
         makeGetRequest(BASE_URL + "/activities", listener);
     }
 
-    // GET activity by ID
-    public static void getActivityById(String id, OnDataReceivedListener listener) {
-        makeGetRequest(BASE_URL + "/activities/" + id, listener);
-    }
-
-    // POST - Create new activity
-    public static void createActivity(String jsonData, OnResponseListener listener) {
-        makePostRequest(BASE_URL + "/activities", jsonData, listener);
-    }
-
-    // PUT - Update activity
-    public static void updateActivity(String id, String jsonData, OnResponseListener listener) {
-        makePutRequest(BASE_URL + "/activities/" + id, jsonData, listener);
-    }
-
-    // DELETE - Delete activity
-    public static void deleteActivity(String id, OnResponseListener listener) {
-        makeDeleteRequest(BASE_URL + "/activities/" + id, listener);
-    }
-
-    // ===== VEHICLE ENDPOINTS =====
-
-    // Lấy thông tin xe theo biển số để thanh toán
-    public static void getVehicleByLicensePlate(String bienSoXe, OnDataReceivedListener listener) {
-        makeGetRequest(BASE_URL + "/activities/license/" + bienSoXe, listener);
-    }
-
-    // Cập nhật thời gian ra và trạng thái xe
-    public static void updateVehicleCheckout(String activityId, String jsonData, OnResponseListener listener) {
-        makePutRequest(BASE_URL + "/activities/" + activityId, jsonData, listener);
-    }
-
-    // Xe vào bãi
-    public static void vehicleCheckIn(String jsonData, OnResponseListener listener) {
-        makePostRequest(BASE_URL + "/vehicle-checkin", jsonData, listener);
-    }
-
-    // Xe ra khỏi bãi
-    public static void vehicleCheckOut(String plateNumber, OnResponseListener listener) {
-        makePutRequest(BASE_URL + "/vehicle-checkout/" + plateNumber, "", listener);
-    }
-
-    // ===== PAYMENT ENDPOINTS =====
-
-    // Lấy danh sách xe cần thanh toán
     public static void getVehiclesNeedPayment(OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting vehicles needing payment");
+        Log.d(TAG, "Getting vehicles needing payment from /api/vehicles/need-payment");
         makeGetRequest(BASE_URL + "/vehicles/need-payment", listener);
     }
 
-    // Tạo transaction thanh toán
-    public static void createTransaction(String jsonData, OnResponseListener listener) {
-        makePostRequest(BASE_URL + "/transactions", jsonData, listener);
+    public static void getVehicleByLicensePlate(String plateNumber, OnDataReceivedListener listener) {
+        if (plateNumber == null || plateNumber.trim().isEmpty()) {
+            listener.onError("Biển số xe không được để trống");
+            return;
+        }
+
+        String encodedPlate = plateNumber.trim().replace(" ", "%20");
+        Log.d(TAG, "Getting vehicle by license plate: " + encodedPlate);
+        makeGetRequest(BASE_URL + "/activities/license/" + encodedPlate, listener);
     }
 
-    // Lấy danh sách transactions
-    public static void getTransactions(OnDataReceivedListener listener) {
-        makeGetRequest(BASE_URL + "/transactions", listener);
+    // PUT - Update activity với retry logic
+    public static void updateActivity(String id, String jsonData, OnResponseListener listener) {
+        updateActivityWithRetry(id, jsonData, listener, MAX_RETRY_ATTEMPTS);
     }
 
-    // ===== SECTION/ZONE ENDPOINTS =====
+    public static void updateActivityWithRetry(String id, String jsonData, OnResponseListener listener, int maxRetries) {
+        if (id == null || id.trim().isEmpty()) {
+            listener.onError("ID hoạt động không được để trống");
+            return;
+        }
 
-    // GET all sections/zones
-    public static void getSections(OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting all parking sections");
-        makeGetRequest(BASE_URL + "/sections", listener);
+        if (jsonData == null || jsonData.trim().isEmpty()) {
+            listener.onError("Dữ liệu JSON không được để trống");
+            return;
+        }
+
+        // Validate JSON format
+        try {
+            new JSONObject(jsonData);
+        } catch (JSONException e) {
+            listener.onError("Định dạng JSON không hợp lệ: " + e.getMessage());
+            return;
+        }
+
+        Log.d(TAG, "Updating activity: " + id + " (attempts left: " + maxRetries + ")");
+        Log.d(TAG, "Update data: " + jsonData);
+
+        makePutRequestWithRetry(BASE_URL + "/activities/" + id.trim(), jsonData, listener, maxRetries);
     }
 
-    // GET section by ID
-    public static void getSectionById(String sectionId, OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting section by ID: " + sectionId);
-        makeGetRequest(BASE_URL + "/sections/" + sectionId, listener);
+    // ===== EVENTS ENDPOINTS =====
+    public static void getEvents(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting all events from /api/events");
+        makeGetRequest(BASE_URL + "/events", listener);
     }
 
-    // POST - Create new section
-    public static void createSection(String jsonData, OnResponseListener listener) {
-        Log.d(TAG, "Creating new section");
-        makePostRequest(BASE_URL + "/sections", jsonData, listener);
+    public static void getEnterPlates(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting enter plate numbers from /api/events/enter-plates");
+        makeGetRequest(BASE_URL + "/events/enter-plates", listener);
     }
 
-    // PUT - Update section
-    public static void updateSection(String sectionId, String jsonData, OnResponseListener listener) {
-        Log.d(TAG, "Updating section: " + sectionId);
-        makePutRequest(BASE_URL + "/sections/" + sectionId, jsonData, listener);
+    public static void processEvents(OnResponseListener listener) {
+        Log.d(TAG, "Processing events to create parking logs at /api/events/process");
+        makePostRequest(BASE_URL + "/events/process", "", listener);
     }
 
-    // DELETE - Delete section
-    public static void deleteSection(String sectionId, OnResponseListener listener) {
-        Log.d(TAG, "Deleting section: " + sectionId);
-        makeDeleteRequest(BASE_URL + "/sections/" + sectionId, listener);
-    }
-
-    // GET parking slots by section
-    public static void getSlotsBySection(String sectionId, OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting slots for section: " + sectionId);
-        makeGetRequest(BASE_URL + "/sections/" + sectionId + "/slots", listener);
-    }
-
-    // GET available slots in a section
-    public static void getAvailableSlotsBySection(String sectionId, OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting available slots for section: " + sectionId);
-        makeGetRequest(BASE_URL + "/sections/" + sectionId + "/slots/available", listener);
-    }
-
-    // GET occupied slots in a section
-    public static void getOccupiedSlotsBySection(String sectionId, OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting occupied slots for section: " + sectionId);
-        makeGetRequest(BASE_URL + "/sections/" + sectionId + "/slots/occupied", listener);
-    }
-
-    // GET section statistics
-    public static void getSectionStatistics(String sectionId, OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting statistics for section: " + sectionId);
-        makeGetRequest(BASE_URL + "/sections/" + sectionId + "/statistics", listener);
-    }
-
-    // GET all sections with their statistics
-    public static void getAllSectionsWithStats(OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting all sections with statistics");
-        makeGetRequest(BASE_URL + "/sections/statistics", listener);
-    }
-
-    // ===== PARKING SLOT ENDPOINTS =====
-
-    // GET all parking slots
-    public static void getParkingSlots(OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting all parking slots");
-        makeGetRequest(BASE_URL + "/parking-slots", listener);
-    }
-
-    // GET parking slot by ID
-    public static void getParkingSlotById(String slotId, OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting parking slot by ID: " + slotId);
-        makeGetRequest(BASE_URL + "/parking-slots/" + slotId, listener);
-    }
-
-    // POST - Create new parking slot
-    public static void createParkingSlot(String jsonData, OnResponseListener listener) {
-        Log.d(TAG, "Creating new parking slot");
-        makePostRequest(BASE_URL + "/parking-slots", jsonData, listener);
-    }
-
-    // PUT - Update parking slot
-    public static void updateParkingSlot(String slotId, String jsonData, OnResponseListener listener) {
-        Log.d(TAG, "Updating parking slot: " + slotId);
-        makePutRequest(BASE_URL + "/parking-slots/" + slotId, jsonData, listener);
-    }
-
-    // DELETE - Delete parking slot
-    public static void deleteParkingSlot(String slotId, OnResponseListener listener) {
-        Log.d(TAG, "Deleting parking slot: " + slotId);
-        makeDeleteRequest(BASE_URL + "/parking-slots/" + slotId, listener);
-    }
-
-    // GET available parking slots
-    public static void getAvailableParkingSlots(OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting available parking slots");
-        makeGetRequest(BASE_URL + "/parking-slots/available", listener);
-    }
-
-    // GET occupied parking slots
-    public static void getOccupiedParkingSlots(OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting occupied parking slots");
-        makeGetRequest(BASE_URL + "/parking-slots/occupied", listener);
-    }
-
-    // ===== POS/PRINT ENDPOINTS =====
-
-    // Gửi lệnh in hóa đơn
+    // ===== PRINT ENDPOINT =====
     public static void sendPrintCommand(String jsonData, OnResponseListener listener) {
-        makePostRequest(BASE_URL + "/pos/print", jsonData, listener);
-    }
-
-    // ===== LEGACY METHOD - Deprecated =====
-
-    /**
-     * @deprecated Sử dụng getVehiclesNeedPayment() thay thế
-     * Lấy danh sách xe cần thanh toán (sử dụng endpoint activities hiện có)
-     * Sẽ filter phía client để tìm xe cần thanh toán
-     */
-    @Deprecated
-    public static void getVehiclesNeedPaymentLegacy(OnDataReceivedListener listener) {
-        Log.d(TAG, "Getting all activities to filter vehicles needing payment (DEPRECATED)");
-        makeGetRequest(BASE_URL + "/activities", new OnDataReceivedListener() {
-            @Override
-            public void onDataReceived(String jsonData) {
-                Log.d(TAG, "Raw activities data: " + jsonData);
-
-                // Kiểm tra nếu response là HTML (lỗi 404)
-                if (jsonData.trim().startsWith("<!DOCTYPE") || jsonData.trim().startsWith("<html")) {
-                    listener.onError("Server trả về trang HTML thay vì JSON - có thể endpoint không tồn tại");
-                    return;
-                }
-
-                try {
-                    // Filter dữ liệu để chỉ lấy xe cần thanh toán
-                    String filteredData = filterVehiclesNeedPayment(jsonData);
-                    listener.onDataReceived(filteredData);
-                } catch (Exception e) {
-                    Log.e(TAG, "Error filtering vehicles need payment", e);
-                    listener.onError("Lỗi xử lý dữ liệu: " + e.getMessage());
-                }
-            }
-
-            @Override
-            public void onError(String errorMessage) {
-                listener.onError(errorMessage);
-            }
-        });
-    }
-
-    /**
-     * Filter xe cần thanh toán từ tất cả activities
-     */
-    private static String filterVehiclesNeedPayment(String allActivitiesJson) throws Exception {
-        org.json.JSONArray allActivities;
-
-        // Xử lý response - có thể là array hoặc object chứa array
-        if (allActivitiesJson.trim().startsWith("[")) {
-            allActivities = new org.json.JSONArray(allActivitiesJson);
-        } else {
-            org.json.JSONObject response = new org.json.JSONObject(allActivitiesJson);
-            if (response.has("data")) {
-                allActivities = response.getJSONArray("data");
-            } else if (response.has("success") && response.getBoolean("success")) {
-                allActivities = response.getJSONArray("data");
-            } else {
-                allActivities = new org.json.JSONArray();
-            }
+        if (jsonData == null || jsonData.trim().isEmpty()) {
+            listener.onError("Dữ liệu in không được để trống");
+            return;
         }
 
-        // Filter để tìm xe cần thanh toán
-        org.json.JSONArray vehiclesNeedPayment = new org.json.JSONArray();
-
-        for (int i = 0; i < allActivities.length(); i++) {
-            org.json.JSONObject vehicle = allActivities.getJSONObject(i);
-
-            // Điều kiện: xe đã ra (có thoiGianRa) và chưa thanh toán
-            boolean hasExitTime = vehicle.has("thoiGianRa") && !vehicle.isNull("thoiGianRa")
-                    && !vehicle.getString("thoiGianRa").isEmpty();
-
-            boolean notPaid = true; // Mặc định chưa thanh toán
-            if (vehicle.has("daThanhToan")) {
-                notPaid = !vehicle.getBoolean("daThanhToan");
+        // Validate print data
+        try {
+            JSONObject printObj = new JSONObject(jsonData);
+            if (!printObj.has("bienSoXe") || printObj.getString("bienSoXe").trim().isEmpty()) {
+                listener.onError("Thiếu thông tin biển số xe để in");
+                return;
             }
-
-            // Kiểm tra trạng thái nếu có
-            boolean needPayment = true;
-            if (vehicle.has("trangThai")) {
-                String status = vehicle.getString("trangThai");
-                needPayment = !status.equals("da_thanh_toan");
-            }
-
-            if (hasExitTime && notPaid && needPayment) {
-                vehiclesNeedPayment.put(vehicle);
-            }
+        } catch (JSONException e) {
+            listener.onError("Dữ liệu in không hợp lệ: " + e.getMessage());
+            return;
         }
 
-        // Tạo response object giống format API
-        org.json.JSONObject result = new org.json.JSONObject();
-        result.put("success", true);
-        result.put("data", vehiclesNeedPayment);
-        result.put("message", "Found " + vehiclesNeedPayment.length() + " vehicles needing payment");
-
-        Log.d(TAG, "Filtered result: " + result.toString());
-        return result.toString();
+        Log.d(TAG, "Sending print command to /api/print");
+        Log.d(TAG, "Print data: " + jsonData);
+        makePostRequestWithRetry(BASE_URL + "/print", jsonData, listener, 2); // Chỉ retry 2 lần cho print
     }
 
-    // ===== HTTP REQUEST METHODS =====
+    // ===== TEST ENDPOINTS =====
+    public static void testConnection(OnDataReceivedListener listener) {
+        Log.d(TAG, "Testing server connection at /api/test");
+        makeGetRequest(BASE_URL + "/test", listener);
+    }
 
-    // Method chung cho GET request
+    // ===== HTTP REQUEST METHODS WITH IMPROVED ERROR HANDLING =====
+
     private static void makeGetRequest(String urlString, OnDataReceivedListener listener) {
-        new AsyncTask<Void, Void, String>() {
-            private String error = null;
-
+        new AsyncTask<Void, Void, ApiResponse>() {
             @Override
-            protected String doInBackground(Void... voids) {
-                try {
-                    Log.d(TAG, "Making GET request to: " + urlString);
-
-                    URL url = new URL(urlString);
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("GET");
-                    connection.setRequestProperty("Content-Type", "application/json");
-                    connection.setRequestProperty("Accept", "application/json");
-                    connection.setConnectTimeout(10000); // 10 seconds timeout
-                    connection.setReadTimeout(15000);    // 15 seconds timeout
-                    connection.connect();
-
-                    int responseCode = connection.getResponseCode();
-                    Log.d(TAG, "Response code: " + responseCode);
-
-                    BufferedReader reader;
-                    StringBuilder response = new StringBuilder();
-                    String line;
-
-                    if (responseCode == HttpURLConnection.HTTP_OK) {
-                        reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                        while ((line = reader.readLine()) != null) {
-                            response.append(line);
-                        }
-                        reader.close();
-                        connection.disconnect();
-
-                        String result = response.toString();
-                        Log.d(TAG, "Response: " + result);
-                        return result;
-                    } else {
-                        // Đọc error response
-                        if (connection.getErrorStream() != null) {
-                            reader = new BufferedReader(new InputStreamReader(connection.getErrorStream()));
-                            while ((line = reader.readLine()) != null) {
-                                response.append(line);
-                            }
-                            reader.close();
-                        }
-
-                        error = "HTTP Error " + responseCode + ": " + response.toString();
-                        Log.e(TAG, error);
-                        return null;
-                    }
-                } catch (Exception e) {
-                    error = "Network Error: " + e.getMessage();
-                    Log.e(TAG, error, e);
-                    return null;
-                }
+            protected ApiResponse doInBackground(Void... voids) {
+                return executeGetRequest(urlString);
             }
 
             @Override
-            protected void onPostExecute(String result) {
-                if (result != null) {
-                    listener.onDataReceived(result);
+            protected void onPostExecute(ApiResponse response) {
+                if (response.isSuccess) {
+                    listener.onDataReceived(response.data);
                 } else {
-                    listener.onError(error != null ? error : "Unknown error occurred");
+                    listener.onError(response.errorMessage);
                 }
             }
         }.execute();
     }
 
-    // Method chung cho POST request
     private static void makePostRequest(String urlString, String jsonData, OnResponseListener listener) {
-        new AsyncTask<Void, Void, String>() {
-            private String error = null;
+        makePostRequestWithRetry(urlString, jsonData, listener, MAX_RETRY_ATTEMPTS);
+    }
 
+    private static void makePostRequestWithRetry(String urlString, String jsonData, OnResponseListener listener, int maxRetries) {
+        new AsyncTask<Void, Void, ApiResponse>() {
             @Override
-            protected String doInBackground(Void... voids) {
-                try {
-                    Log.d(TAG, "Making POST request to: " + urlString);
-                    Log.d(TAG, "POST data: " + jsonData);
-
-                    URL url = new URL(urlString);
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("POST");
-                    connection.setRequestProperty("Content-Type", "application/json");
-                    connection.setRequestProperty("Accept", "application/json");
-                    connection.setDoOutput(true);
-                    connection.setConnectTimeout(10000);
-                    connection.setReadTimeout(15000);
-
-                    // Gửi dữ liệu JSON
-                    if (jsonData != null && !jsonData.isEmpty()) {
-                        OutputStream outputStream = connection.getOutputStream();
-                        outputStream.write(jsonData.getBytes("UTF-8"));
-                        outputStream.flush();
-                        outputStream.close();
-                    }
-
-                    int responseCode = connection.getResponseCode();
-                    Log.d(TAG, "POST Response code: " + responseCode);
-
-                    BufferedReader reader;
-                    StringBuilder response = new StringBuilder();
-                    String line;
-
-                    if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_CREATED) {
-                        reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                        while ((line = reader.readLine()) != null) {
-                            response.append(line);
-                        }
-                        reader.close();
-                        connection.disconnect();
-
-                        String result = response.toString();
-                        Log.d(TAG, "POST Response: " + result);
-                        return result;
-                    } else {
-                        if (connection.getErrorStream() != null) {
-                            reader = new BufferedReader(new InputStreamReader(connection.getErrorStream()));
-                            while ((line = reader.readLine()) != null) {
-                                response.append(line);
-                            }
-                            reader.close();
-                        }
-
-                        error = "HTTP Error " + responseCode + ": " + response.toString();
-                        Log.e(TAG, error);
-                        return null;
-                    }
-                } catch (Exception e) {
-                    error = "Network Error: " + e.getMessage();
-                    Log.e(TAG, error, e);
-                    return null;
-                }
+            protected ApiResponse doInBackground(Void... voids) {
+                return executePostRequestWithRetry(urlString, jsonData, maxRetries);
             }
 
             @Override
-            protected void onPostExecute(String result) {
-                if (result != null) {
-                    listener.onSuccess(result);
+            protected void onPostExecute(ApiResponse response) {
+                if (response.isSuccess) {
+                    listener.onSuccess(response.data);
                 } else {
-                    listener.onError(error != null ? error : "Unknown error occurred");
+                    listener.onError(response.errorMessage);
                 }
             }
         }.execute();
     }
 
-    // Method chung cho PUT request
-    private static void makePutRequest(String urlString, String jsonData, OnResponseListener listener) {
-        new AsyncTask<Void, Void, String>() {
-            private String error = null;
-
+    private static void makePutRequestWithRetry(String urlString, String jsonData, OnResponseListener listener, int maxRetries) {
+        new AsyncTask<Void, Void, ApiResponse>() {
             @Override
-            protected String doInBackground(Void... voids) {
-                try {
-                    Log.d(TAG, "Making PUT request to: " + urlString);
-                    Log.d(TAG, "PUT data: " + jsonData);
-
-                    URL url = new URL(urlString);
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("PUT");
-                    connection.setRequestProperty("Content-Type", "application/json");
-                    connection.setRequestProperty("Accept", "application/json");
-                    connection.setDoOutput(true);
-                    connection.setConnectTimeout(10000);
-                    connection.setReadTimeout(15000);
-
-                    // Gửi dữ liệu JSON
-                    if (jsonData != null && !jsonData.isEmpty()) {
-                        OutputStream outputStream = connection.getOutputStream();
-                        outputStream.write(jsonData.getBytes("UTF-8"));
-                        outputStream.flush();
-                        outputStream.close();
-                    }
-
-                    int responseCode = connection.getResponseCode();
-                    Log.d(TAG, "PUT Response code: " + responseCode);
-
-                    BufferedReader reader;
-                    StringBuilder response = new StringBuilder();
-                    String line;
-
-                    if (responseCode == HttpURLConnection.HTTP_OK) {
-                        reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                        while ((line = reader.readLine()) != null) {
-                            response.append(line);
-                        }
-                        reader.close();
-                        connection.disconnect();
-
-                        String result = response.toString();
-                        Log.d(TAG, "PUT Response: " + result);
-                        return result;
-                    } else {
-                        if (connection.getErrorStream() != null) {
-                            reader = new BufferedReader(new InputStreamReader(connection.getErrorStream()));
-                            while ((line = reader.readLine()) != null) {
-                                response.append(line);
-                            }
-                            reader.close();
-                        }
-
-                        error = "HTTP Error " + responseCode + ": " + response.toString();
-                        Log.e(TAG, error);
-                        return null;
-                    }
-                } catch (Exception e) {
-                    error = "Network Error: " + e.getMessage();
-                    Log.e(TAG, error, e);
-                    return null;
-                }
+            protected ApiResponse doInBackground(Void... voids) {
+                return executePutRequestWithRetry(urlString, jsonData, maxRetries);
             }
 
             @Override
-            protected void onPostExecute(String result) {
-                if (result != null) {
-                    listener.onSuccess(result);
+            protected void onPostExecute(ApiResponse response) {
+                if (response.isSuccess) {
+                    listener.onSuccess(response.data);
                 } else {
-                    listener.onError(error != null ? error : "Unknown error occurred");
+                    listener.onError(response.errorMessage);
                 }
             }
         }.execute();
     }
 
-    // Method chung cho DELETE request
-    private static void makeDeleteRequest(String urlString, OnResponseListener listener) {
-        new AsyncTask<Void, Void, String>() {
-            private String error = null;
+    // ===== CORE HTTP EXECUTION METHODS =====
 
-            @Override
-            protected String doInBackground(Void... voids) {
-                try {
-                    Log.d(TAG, "Making DELETE request to: " + urlString);
+    private static ApiResponse executeGetRequest(String urlString) {
+        HttpURLConnection connection = null;
+        try {
+            Log.d(TAG, "Making GET request to: " + urlString);
 
-                    URL url = new URL(urlString);
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("DELETE");
-                    connection.setRequestProperty("Content-Type", "application/json");
-                    connection.setConnectTimeout(10000);
-                    connection.setReadTimeout(15000);
-                    connection.connect();
+            URL url = new URL(urlString);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "BaiDoXeAndroidApp/1.0");
+            connection.setConnectTimeout(CONNECT_TIMEOUT);
+            connection.setReadTimeout(READ_TIMEOUT);
+            connection.setUseCaches(false);
 
-                    int responseCode = connection.getResponseCode();
-                    Log.d(TAG, "DELETE Response code: " + responseCode);
+            int responseCode = connection.getResponseCode();
+            Log.d(TAG, "GET Response code: " + responseCode);
 
-                    BufferedReader reader;
-                    StringBuilder response = new StringBuilder();
+            return handleResponse(connection, responseCode);
+
+        } catch (Exception e) {
+            Log.e(TAG, "GET request failed: " + urlString, e);
+            return new ApiResponse(false, null, getErrorMessage(e));
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static ApiResponse executePostRequestWithRetry(String urlString, String jsonData, int maxRetries) {
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            Log.d(TAG, "POST attempt " + attempt + "/" + maxRetries + " to: " + urlString);
+
+            ApiResponse response = executePostRequest(urlString, jsonData);
+
+            if (response.isSuccess || !shouldRetry(response.errorMessage) || attempt == maxRetries) {
+                if (!response.isSuccess && attempt > 1) {
+                    Log.w(TAG, "POST failed after " + attempt + " attempts: " + response.errorMessage);
+                }
+                return response;
+            }
+
+            // Wait before retry
+            try {
+                Thread.sleep(1000 * attempt); // Exponential backoff
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return new ApiResponse(false, null, "Request interrupted");
+            }
+        }
+
+        return new ApiResponse(false, null, "Max retries exceeded");
+    }
+
+    private static ApiResponse executePutRequestWithRetry(String urlString, String jsonData, int maxRetries) {
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            Log.d(TAG, "PUT attempt " + attempt + "/" + maxRetries + " to: " + urlString);
+
+            ApiResponse response = executePutRequest(urlString, jsonData);
+
+            if (response.isSuccess || !shouldRetry(response.errorMessage) || attempt == maxRetries) {
+                if (!response.isSuccess && attempt > 1) {
+                    Log.w(TAG, "PUT failed after " + attempt + " attempts: " + response.errorMessage);
+                }
+                return response;
+            }
+
+            // Wait before retry
+            try {
+                Thread.sleep(1000 * attempt); // Exponential backoff
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return new ApiResponse(false, null, "Request interrupted");
+            }
+        }
+
+        return new ApiResponse(false, null, "Max retries exceeded");
+    }
+
+    private static ApiResponse executePostRequest(String urlString, String jsonData) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(urlString);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "BaiDoXeAndroidApp/1.0");
+            connection.setDoOutput(true);
+            connection.setConnectTimeout(CONNECT_TIMEOUT);
+            connection.setReadTimeout(READ_TIMEOUT);
+            connection.setUseCaches(false);
+
+            // Send JSON data
+            if (jsonData != null && !jsonData.isEmpty()) {
+                try (OutputStream outputStream = connection.getOutputStream()) {
+                    byte[] input = jsonData.getBytes("UTF-8");
+                    outputStream.write(input, 0, input.length);
+                    outputStream.flush();
+                }
+            }
+
+            int responseCode = connection.getResponseCode();
+            Log.d(TAG, "POST Response code: " + responseCode);
+
+            return handleResponse(connection, responseCode);
+
+        } catch (Exception e) {
+            Log.e(TAG, "POST request failed: " + urlString, e);
+            return new ApiResponse(false, null, getErrorMessage(e));
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static ApiResponse executePutRequest(String urlString, String jsonData) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(urlString);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("PUT");
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "BaiDoXeAndroidApp/1.0");
+            connection.setDoOutput(true);
+            connection.setConnectTimeout(CONNECT_TIMEOUT);
+            connection.setReadTimeout(read_TIMEOUT);
+            connection.setUseCaches(false);
+
+            // Send JSON data
+            if (jsonData != null && !jsonData.isEmpty()) {
+                try (OutputStream outputStream = connection.getOutputStream()) {
+                    byte[] input = jsonData.getBytes("UTF-8");
+                    outputStream.write(input, 0, input.length);
+                    outputStream.flush();
+                }
+            }
+
+            int responseCode = connection.getResponseCode();
+            Log.d(TAG, "PUT Response code: " + responseCode);
+
+            return handleResponse(connection, responseCode);
+
+        } catch (Exception e) {
+            Log.e(TAG, "PUT request failed: " + urlString, e);
+            return new ApiResponse(false, null, getErrorMessage(e));
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    // ===== RESPONSE HANDLING =====
+
+    private static ApiResponse handleResponse(HttpURLConnection connection, int responseCode) throws IOException {
+        StringBuilder response = new StringBuilder();
+        BufferedReader reader = null;
+
+        try {
+            if (responseCode >= 200 && responseCode < 300) {
+                // Success response
+                reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    response.append(line);
+                }
+
+                String result = response.toString();
+                Log.d(TAG, "Success response: " + result);
+                return new ApiResponse(true, result, null);
+
+            } else {
+                // Error response
+                if (connection.getErrorStream() != null) {
+                    reader = new BufferedReader(new InputStreamReader(connection.getErrorStream(), "UTF-8"));
                     String line;
-
-                    if (responseCode == HttpURLConnection.HTTP_OK || responseCode == HttpURLConnection.HTTP_NO_CONTENT) {
-                        if (connection.getInputStream() != null) {
-                            reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-                            while ((line = reader.readLine()) != null) {
-                                response.append(line);
-                            }
-                            reader.close();
-                        }
-                        connection.disconnect();
-
-                        String result = response.toString();
-                        Log.d(TAG, "DELETE Response: " + result);
-                        return result.isEmpty() ? "Delete successful" : result;
-                    } else {
-                        if (connection.getErrorStream() != null) {
-                            reader = new BufferedReader(new InputStreamReader(connection.getErrorStream()));
-                            while ((line = reader.readLine()) != null) {
-                                response.append(line);
-                            }
-                            reader.close();
-                        }
-
-                        error = "HTTP Error " + responseCode + ": " + response.toString();
-                        Log.e(TAG, error);
-                        return null;
+                    while ((line = reader.readLine()) != null) {
+                        response.append(line);
                     }
-                } catch (Exception e) {
-                    error = "Network Error: " + e.getMessage();
-                    Log.e(TAG, error, e);
-                    return null;
                 }
+
+                String errorBody = response.toString();
+                String errorMessage = parseErrorMessage(responseCode, errorBody);
+                Log.e(TAG, "HTTP Error " + responseCode + ": " + errorMessage);
+
+                return new ApiResponse(false, null, errorMessage);
             }
 
-            @Override
-            protected void onPostExecute(String result) {
-                if (result != null) {
-                    listener.onSuccess(result);
-                } else {
-                    listener.onError(error != null ? error : "Unknown error occurred");
+        } finally {
+            if (reader != null) {
+                try {
+                    reader.close();
+                } catch (IOException e) {
+                    Log.w(TAG, "Error closing reader", e);
                 }
             }
-        }.execute();
+        }
+    }
+
+    private static String parseErrorMessage(int responseCode, String errorBody) {
+        try {
+            if (errorBody != null && !errorBody.trim().isEmpty()) {
+                JSONObject errorJson = new JSONObject(errorBody);
+                if (errorJson.has("message")) {
+                    return "HTTP " + responseCode + ": " + errorJson.getString("message");
+                }
+                if (errorJson.has("error")) {
+                    return "HTTP " + responseCode + ": " + errorJson.getString("error");
+                }
+            }
+        } catch (JSONException e) {
+            Log.w(TAG, "Could not parse error response as JSON", e);
+        }
+
+        // Fallback to generic HTTP error messages
+        switch (responseCode) {
+            case 400: return "Yêu cầu không hợp lệ (400)";
+            case 401: return "Chưa xác thực (401)";
+            case 403: return "Không có quyền truy cập (403)";
+            case 404: return "Không tìm thấy tài nguyên (404)";
+            case 405: return "Phương thức không được hỗ trợ (405)";
+            case 409: return "Xung đột dữ liệu (409)";
+            case 422: return "Dữ liệu không thể xử lý (422)";
+            case 429: return "Quá nhiều yêu cầu (429)";
+            case 500: return "Lỗi máy chủ nội bộ (500)";
+            case 502: return "Gateway lỗi (502)";
+            case 503: return "Dịch vụ không khả dụng (503)";
+            case 504: return "Gateway timeout (504)";
+            default: return "Lỗi HTTP " + responseCode + (errorBody.isEmpty() ? "" : ": " + errorBody);
+        }
+    }
+
+    private static String getErrorMessage(Exception e) {
+        if (e instanceof SocketTimeoutException) {
+            return "Timeout: Kết nối tới server quá chậm";
+        } else if (e instanceof ConnectException) {
+            return "Không thể kết nối tới server. Kiểm tra mạng và địa chỉ IP.";
+        } else if (e instanceof UnknownHostException) {
+            return "Không tìm thấy server. Kiểm tra địa chỉ IP: " + BASE_URL;
+        } else if (e instanceof IOException) {
+            return "Lỗi kết nối mạng: " + e.getMessage();
+        } else {
+            return "Lỗi không xác định: " + e.getMessage();
+        }
+    }
+
+    private static boolean shouldRetry(String errorMessage) {
+        if (errorMessage == null) return false;
+
+        // Retry on network errors and 5xx server errors, but not on client errors (4xx)
+        return errorMessage.contains("timeout") ||
+                errorMessage.contains("connection") ||
+                errorMessage.contains("500") ||
+                errorMessage.contains("502") ||
+                errorMessage.contains("503") ||
+                errorMessage.contains("504");
+    }
+
+    // ===== UTILITY CLASSES =====
+
+    private static class ApiResponse {
+        final boolean isSuccess;
+        final String data;
+        final String errorMessage;
+
+        ApiResponse(boolean isSuccess, String data, String errorMessage) {
+            this.isSuccess = isSuccess;
+            this.data = data;
+            this.errorMessage = errorMessage;
+        }
     }
 
     // ===== UTILITY METHODS =====
 
-    // Utility method để check network connectivity
     public static boolean isValidUrl(String url) {
         try {
             new URL(url);
@@ -607,33 +506,67 @@ public class ApiHelper {
         }
     }
 
-    // Method để test connection
-    public static void testConnection(OnResponseListener listener) {
-        makeGetRequest(BASE_URL + "/activities", new OnDataReceivedListener() {
+    public static void pingServer(OnResponseListener listener) {
+        testConnection(new OnDataReceivedListener() {
             @Override
             public void onDataReceived(String jsonData) {
-                listener.onSuccess("Connection successful to " + BASE_URL);
+                listener.onSuccess("Server connection successful: " + jsonData);
             }
 
             @Override
             public void onError(String errorMessage) {
-                listener.onError("Connection failed: " + errorMessage);
+                listener.onError("Server connection failed: " + errorMessage);
             }
         });
     }
 
-    // Test connection to sections endpoint
-    public static void testSectionConnection(OnResponseListener listener) {
-        makeGetRequest(BASE_URL + "/sections", new OnDataReceivedListener() {
+    // ===== CONVENIENCE METHODS =====
+
+    public static void getDashboardData(OnDataReceivedListener statsListener, OnDataReceivedListener activitiesListener) {
+        Log.d(TAG, "Getting complete dashboard data");
+
+        getDashboardStats(new OnDataReceivedListener() {
             @Override
             public void onDataReceived(String jsonData) {
-                listener.onSuccess("Section endpoint connection successful");
+                Log.d(TAG, "Dashboard stats received");
+                statsListener.onDataReceived(jsonData);
             }
 
             @Override
             public void onError(String errorMessage) {
-                listener.onError("Section endpoint connection failed: " + errorMessage);
+                Log.e(TAG, "Dashboard stats error: " + errorMessage);
+                statsListener.onError(errorMessage);
             }
         });
+
+        getRecentActivitiesWithLimit(10, new OnDataReceivedListener() {
+            @Override
+            public void onDataReceived(String jsonData) {
+                Log.d(TAG, "Recent activities received");
+                activitiesListener.onDataReceived(jsonData);
+            }
+
+            @Override
+            public void onError(String errorMessage) {
+                Log.e(TAG, "Recent activities error: " + errorMessage);
+                activitiesListener.onError(errorMessage);
+            }
+        });
+    }
+
+    public static void getPaymentManagementData(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting payment management data");
+        getVehiclesNeedPayment(listener);
+    }
+
+    // Legacy compatibility
+    public static void getParkingEvents(OnDataReceivedListener listener) {
+        getActivities(listener);
+    }
+
+    // Transaction methods
+    public static void getTransactions(OnDataReceivedListener listener) {
+        Log.d(TAG, "Getting all transactions from /api/transactions");
+        makeGetRequest(BASE_URL + "/transactions", listener);
     }
 }

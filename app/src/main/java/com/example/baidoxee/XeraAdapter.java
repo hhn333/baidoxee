@@ -3,7 +3,6 @@ package com.example.baidoxee;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -51,9 +50,6 @@ public class XeraAdapter extends RecyclerView.Adapter<XeraAdapter.LogViewHolder>
         } else {
             holder.tvTimeOut.setText("--:--");
         }
-
-        // Nếu có hiển thị ảnh thì xử lý thêm ở đây (nếu ảnh là URL hoặc byte array)
-        // Example: holder.imagePlate.setImageBitmap(...) hoặc Glide/Picasso
     }
 
     @Override
@@ -69,14 +65,12 @@ public class XeraAdapter extends RecyclerView.Adapter<XeraAdapter.LogViewHolder>
 
     static class LogViewHolder extends RecyclerView.ViewHolder {
         TextView tvPlate, tvTimeIn, tvTimeOut;
-        ImageView imagePlate;
 
         public LogViewHolder(@NonNull View itemView) {
             super(itemView);
             tvPlate = itemView.findViewById(R.id.textPlate);
             tvTimeIn = itemView.findViewById(R.id.textTimeIn);
             tvTimeOut = itemView.findViewById(R.id.textTimeOut);
-            imagePlate = itemView.findViewById(R.id.imagePlate);
         }
     }
 }
