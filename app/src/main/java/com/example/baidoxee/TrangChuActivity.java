@@ -10,6 +10,18 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
+
+import com.android.volley.DefaultRetryPolicy;
+import com.android.volley.NetworkError;
+import com.android.volley.NoConnectionError;
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.ServerError;
+import com.android.volley.TimeoutError;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonArrayRequest;
+import com.android.volley.toolbox.Volley;
+
 import com.github.mikephil.charting.charts.PieChart;
 import com.github.mikephil.charting.data.PieData;
 import com.github.mikephil.charting.data.PieDataSet;
@@ -23,17 +35,22 @@ import org.json.JSONObject;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
+import java.util.TimeZone;
 
 public class TrangChuActivity extends AppCompatActivity {
     private static final String TAG = "TrangChuActivity";
     private static final int TOTAL_PARKING_SPOTS = 13;
     private static final long AUTO_REFRESH_INTERVAL = 30000;
     private static final long TIME_UPDATE_INTERVAL = 1000;
+    private static final String EVENTS_URL = "https://baidoxe.onrender.com/api/events";
 
     // UI Components
     private TextView tvParkingSpots, tvParkedCars, tvTodayCars, tvCurrentTime, tvCurrentDate;
@@ -47,6 +64,35 @@ public class TrangChuActivity extends AppCompatActivity {
     private Handler uiUpdateHandler, autoRefreshHandler;
     private Runnable timeUpdateRunnable, autoRefreshRunnable;
     private boolean isLoading = false;
+    private RequestQueue requestQueue;
+
+    // Cache tĩnh để tái sử dụng (giống XeVaoActivity)
+    private static final SimpleDateFormat UTC_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault());
+    private static final SimpleDateFormat UTC_FORMAT_MILLIS = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS", Locale.getDefault());
+    private static final SimpleDateFormat VN_TIME_FORMAT = new SimpleDateFormat("HH:mm", Locale.getDefault());
+
+    static {
+        UTC_FORMAT.setTimeZone(TimeZone.getTimeZone("UTC"));
+        UTC_FORMAT_MILLIS.setTimeZone(TimeZone.getTimeZone("UTC"));
+        VN_TIME_FORMAT.setTimeZone(TimeZone.getTimeZone("Asia/Ho_Chi_Minh"));
+    }
+
+    // Class để lưu thông tin event (giống XeVaoActivity)
+    private static class VehicleEvent {
+        String plateText;
+        String eventType;
+        Date timestamp;
+        String plateImage;
+        JSONObject originalObject;
+
+        VehicleEvent(String plateText, String eventType, Date timestamp, String plateImage, JSONObject originalObject) {
+            this.plateText = plateText;
+            this.eventType = eventType;
+            this.timestamp = timestamp;
+            this.plateImage = plateImage;
+            this.originalObject = originalObject;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,6 +101,7 @@ public class TrangChuActivity extends AppCompatActivity {
 
         initViews();
         initData();
+        initializeNetwork();
         setupPieChart();
         setupBottomNavigation();
         setupRealTimeUpdates();
@@ -108,6 +155,10 @@ public class TrangChuActivity extends AppCompatActivity {
         uiUpdateHandler = new Handler(getMainLooper());
         autoRefreshHandler = new Handler(getMainLooper());
         currentAvailableSpots = TOTAL_PARKING_SPOTS;
+    }
+
+    private void initializeNetwork() {
+        requestQueue = Volley.newRequestQueue(this);
     }
 
     private void setupPieChart() {
@@ -206,196 +257,260 @@ public class TrangChuActivity extends AppCompatActivity {
         if (isLoading) return;
 
         isLoading = true;
-        loadDashboardStatsFromAPI();
+        fetchEventsData();
     }
 
-    private void loadDashboardStatsFromAPI() {
-        ApiHelper.getDashboardStats(new ApiHelper.OnDataReceivedListener() {
-            @Override
-            public void onDataReceived(String jsonData) {
-                try {
-                    JSONObject response = new JSONObject(jsonData);
-                    if (response.has("success") && response.getBoolean("success")) {
-                        JSONObject data = response.getJSONObject("data");
-                        updateDashboardStatsFromAPI(data);
-                    } else {
-                        loadDashboardStatsFromActivities();
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error parsing dashboard stats from API", e);
-                    loadDashboardStatsFromActivities();
+    // Sử dụng logic từ XeVaoActivity để lấy số xe đang đỗ
+    private void fetchEventsData() {
+        if (isFinishing()) return;
+
+        JsonArrayRequest request = new JsonArrayRequest(Request.Method.GET, EVENTS_URL, null,
+                response -> {
+                    if (response != null) parseEventsData(response);
+                },
+                this::handleVolleyError
+        );
+
+        request.setRetryPolicy(new DefaultRetryPolicy(5000, 0, DefaultRetryPolicy.DEFAULT_BACKOFF_MULT));
+        requestQueue.add(request);
+    }
+
+    // Logic parse đã được sửa để tính xe hôm nay theo yêu cầu mới
+    private void parseEventsData(JSONArray response) {
+        try {
+            List<VehicleEvent> allEvents = new ArrayList<>();
+
+            // Parse tất cả events
+            for (int i = 0; i < response.length(); i++) {
+                JSONObject obj = response.getJSONObject(i);
+                if (obj == null) continue;
+
+                String plateText = extractVehiclePlate(obj);
+                String eventType = obj.optString("event_type", "");
+                String rawTimestamp = extractTimeFromDate(obj, "timestamp");
+                Date timestamp = parseTimeString(rawTimestamp);
+                String plateImage = obj.optString("plate_image", "");
+
+                // Chỉ xử lý events có thông tin đầy đủ
+                if (!plateText.isEmpty() && !eventType.isEmpty() && timestamp != null) {
+                    allEvents.add(new VehicleEvent(plateText, eventType, timestamp, plateImage, obj));
                 }
             }
 
-            @Override
-            public void onError(String errorMessage) {
-                loadDashboardStatsFromActivities();
-            }
-        });
-    }
+            // Sort events theo thời gian (cũ nhất trước)
+            Collections.sort(allEvents, (a, b) -> a.timestamp.compareTo(b.timestamp));
 
-    private void loadDashboardStatsFromActivities() {
-        ApiHelper.getActivities(new ApiHelper.OnDataReceivedListener() {
-            @Override
-            public void onDataReceived(String jsonData) {
-                try {
-                    JSONObject calculatedStats = calculateStatsFromActivities(jsonData);
-                    updateDashboardStatsFromAPI(calculatedStats);
-                } catch (Exception e) {
-                    Log.e(TAG, "Error calculating stats from activities", e);
-                    showStatsError("Lỗi tính toán thống kê từ dữ liệu hoạt động");
-                } finally {
-                    runOnUiThread(() -> isLoading = false);
+            // Tìm xe đang đỗ (logic cũ giữ nguyên)
+            Map<String, VehicleEvent> vehicleStatus = new HashMap<>();
+
+            for (VehicleEvent event : allEvents) {
+                String plateKey = event.plateText.toLowerCase().trim();
+
+                if ("enter".equals(event.eventType)) {
+                    // Xe vào - cập nhật status
+                    vehicleStatus.put(plateKey, event);
+                } else if ("exit".equals(event.eventType)) {
+                    // Xe ra - xóa khỏi danh sách đang đỗ
+                    vehicleStatus.remove(plateKey);
                 }
             }
 
-            @Override
-            public void onError(String errorMessage) {
-                showStatsError("Không thể tải dữ liệu thống kê");
-                runOnUiThread(() -> isLoading = false);
-            }
-        });
+            // Tính toán số xe đang đỗ
+            int currentParkedCars = vehicleStatus.size();
+
+            // THAY ĐỔI LOGIC XE HÔM NAY: Chỉ đếm sự kiện "enter" trong ngày hôm nay
+            int todayEnterEvents;
+            String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
+
+            // Chỉ đếm sự kiện "enter"
+            todayEnterEvents = (int) allEvents.stream().filter(event -> "enter".equals(event.eventType)).map(event -> extractDateFromTimestamp(event.timestamp)).filter(today::equals).count();
+
+            // Update UI trên main thread
+            runOnUiThread(() -> {
+                updateDashboardUI(currentParkedCars, todayEnterEvents);
+            });
+
+            Log.d(TAG, "Processed " + allEvents.size() + " events, found " + currentParkedCars + " parked cars, " + todayEnterEvents + " enter events today");
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing events data", e);
+            runOnUiThread(() -> {
+                showStatsError("Lỗi xử lý dữ liệu");
+            });
+        }
     }
 
-    private JSONObject calculateStatsFromActivities(String jsonData) throws JSONException {
-        JSONArray activitiesArray;
+    private void updateDashboardUI(int parkedCars, int todayEnterEvents) {
+        try {
+            int availableSpots = Math.max(0, TOTAL_PARKING_SPOTS - parkedCars);
 
-        if (jsonData.trim().startsWith("[")) {
-            activitiesArray = new JSONArray(jsonData);
-        } else {
-            JSONObject response = new JSONObject(jsonData);
-            if (response.has("success") && response.getBoolean("success")) {
-                activitiesArray = response.getJSONArray("data");
-            } else if (response.has("data")) {
-                activitiesArray = response.getJSONArray("data");
-            } else {
-                activitiesArray = new JSONArray();
-            }
+            this.currentAvailableSpots = availableSpots;
+            this.currentParkedCount = parkedCars;
+            this.totalTodayCars = todayEnterEvents; // Đây là số sự kiện "enter" hôm nay
+
+            setTextSafe(tvParkingSpots, String.valueOf(availableSpots));
+            setTextSafe(tvParkedCars, String.valueOf(parkedCars));
+            setTextSafe(tvTodayCars, String.valueOf(todayEnterEvents));
+
+            updatePieChart(availableSpots, parkedCars);
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating dashboard UI", e);
+            showStatsError("Lỗi cập nhật giao diện");
+        } finally {
+            isLoading = false;
         }
-
-        Set<String> uniqueVehicles = new HashSet<>();
-        int inProgressCount = 0;
-        int totalRevenue = 0;
-
-        String today = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(new Date());
-
-        for (int i = 0; i < activitiesArray.length(); i++) {
-            JSONObject activityObject = activitiesArray.getJSONObject(i);
-
-            String plateNumber = getFieldValue(activityObject, new String[]{"plateNumber", "plate_number", "licensePlate", "bien_so_xe", "plate_text"});
-            String status = getFieldValue(activityObject, new String[]{"status", "trangThai", "trang_thai"});
-            int fee = getIntFieldValue(activityObject, new String[]{"fee", "phiGuiXe", "phi_gui_xe", "amount"});
-            String timeIn = getTimeInField(activityObject);
-
-            boolean isToday = isDateToday(timeIn, today);
-
-            if (isToday) {
-                uniqueVehicles.add(plateNumber);
-
-                if ("IN_PROGRESS".equals(status)) {
-                    inProgressCount++;
-                }
-
-                if (fee > 0) {
-                    totalRevenue += fee;
-                }
-            }
-        }
-
-        int availableSpots = Math.max(0, TOTAL_PARKING_SPOTS - inProgressCount);
-
-        JSONObject stats = new JSONObject();
-        stats.put("availableSpots", availableSpots);
-        stats.put("carsParked", inProgressCount);
-        stats.put("todayCars", uniqueVehicles.size());
-        stats.put("todayRevenue", totalRevenue);
-
-        return stats;
     }
 
-    private String getFieldValue(JSONObject obj, String[] fieldNames) {
-        for (String field : fieldNames) {
-            String value = obj.optString(field);
-            if (!value.isEmpty()) return value;
-        }
-
-        // Handle nested vehicle object
-        JSONObject vehicle = obj.optJSONObject("vehicle");
-        if (vehicle != null) {
-            for (String field : fieldNames) {
-                String value = vehicle.optString(field);
-                if (!value.isEmpty()) return value;
-            }
-        }
-
-        return fieldNames.length > 2 ? "N/A" : "IN_PROGRESS";
-    }
-
-    private int getIntFieldValue(JSONObject obj, String[] fieldNames) {
-        for (String field : fieldNames) {
-            int value = obj.optInt(field, -1);
-            if (value != -1) return value;
-        }
-        return 0;
-    }
-
-    private String getTimeInField(JSONObject activityObject) {
-        String timeIn = getFieldValue(activityObject, new String[]{"timeIn", "time_in", "thoiGianVao", "thoi_gian_vao", "createdAt"});
-
-        if (timeIn.isEmpty()) {
-            JSONObject timeInObj = activityObject.optJSONObject("timeIn");
-            if (timeInObj != null) {
-                timeIn = timeInObj.optString("$date", "");
-            }
-        }
-        return timeIn;
-    }
-
-    private boolean isDateToday(String timeIn, String today) {
-        if (timeIn == null || timeIn.isEmpty()) return false;
+    // Các method helper từ XeVaoActivity (giữ nguyên)
+    private Date parseTimeString(String timeString) {
+        if (!isValidTimeString(timeString)) return null;
 
         try {
-            if (timeIn.contains("T")) {
-                String dateOnly = timeIn.substring(0, 10);
-                return today.equals(dateOnly);
+            String cleaned = timeString.trim();
+
+            // Loại bỏ timezone suffix nhanh
+            if (cleaned.endsWith("Z")) {
+                cleaned = cleaned.substring(0, cleaned.length() - 1);
+            } else if (cleaned.contains("+") || cleaned.lastIndexOf("-") > 10) {
+                int tzIndex = Math.max(cleaned.lastIndexOf("+"), cleaned.lastIndexOf("-"));
+                if (tzIndex > 10) {
+                    cleaned = cleaned.substring(0, tzIndex);
+                }
             }
-            return timeIn.startsWith(today);
+
+            // Parse với format phù hợp
+            if (cleaned.contains(".")) {
+                return UTC_FORMAT_MILLIS.parse(cleaned);
+            } else {
+                return UTC_FORMAT.parse(cleaned);
+            }
         } catch (Exception e) {
-            Log.e(TAG, "Error parsing date: " + timeIn, e);
-            return false;
+            return null;
         }
     }
 
-    private void updateDashboardStatsFromAPI(JSONObject data) {
-        runOnUiThread(() -> {
-            try {
-                int availableSpots = data.optInt("availableSpots", 0);
-                int carsParked = data.optInt("carsParked", 0);
-                int todayCars = data.optInt("todayCars", 0);
-                int todayRevenue = data.optInt("todayRevenue", 0);
+    private String extractVehiclePlate(JSONObject obj) {
+        try {
+            // Lấy từ field plate_text trước (trong collection events)
+            String plateText = obj.optString("plate_text", "");
+            if (!plateText.isEmpty() && !plateText.equals("null")) return plateText;
 
-                if (availableSpots + carsParked > TOTAL_PARKING_SPOTS) {
-                    availableSpots = Math.max(0, TOTAL_PARKING_SPOTS - carsParked);
+            // Kiểm tra trường đơn giản khác
+            String plateNumber = obj.optString("plateNumber", "");
+            if (!plateNumber.isEmpty() && !plateNumber.equals("null")) return plateNumber;
+
+            String licensePlate = obj.optString("licensePlate", "");
+            if (!licensePlate.isEmpty() && !licensePlate.equals("null")) return licensePlate;
+
+            // Kiểm tra vehicle object
+            if (obj.has("vehicle")) {
+                Object vehicleObj = obj.get("vehicle");
+                if (vehicleObj instanceof JSONObject) {
+                    JSONObject vehicleRef = (JSONObject) vehicleObj;
+
+                    plateNumber = vehicleRef.optString("plateNumber", "");
+                    if (!plateNumber.isEmpty() && !plateNumber.equals("null")) return plateNumber;
+
+                    licensePlate = vehicleRef.optString("licensePlate", "");
+                    if (!licensePlate.isEmpty() && !licensePlate.equals("null")) return licensePlate;
+
+                    // Nếu có ID thì hiển thị ID rút gọn
+                    String vehicleId = extractObjectId(vehicleRef);
+                    if (vehicleId != null) {
+                        return "ID: " + vehicleId.substring(0, Math.min(8, vehicleId.length())) + "...";
+                    }
+                } else if (vehicleObj instanceof String) {
+                    String vehicleStr = (String) vehicleObj;
+                    if (!vehicleStr.isEmpty() && !vehicleStr.equals("null")) {
+                        return vehicleStr;
+                    }
                 }
-
-                this.currentAvailableSpots = availableSpots;
-                this.currentParkedCount = carsParked;
-                this.totalTodayCars = todayCars;
-                this.totalTodayRevenue = todayRevenue;
-
-                setTextSafe(tvParkingSpots, String.valueOf(availableSpots));
-                setTextSafe(tvParkedCars, String.valueOf(carsParked));
-                setTextSafe(tvTodayCars, String.valueOf(todayCars));
-
-                updatePieChart(availableSpots, carsParked);
-
-            } catch (Exception e) {
-                Log.e(TAG, "Error updating dashboard stats UI", e);
-                showStatsError("Lỗi cập nhật giao diện thống kê");
-            } finally {
-                isLoading = false;
             }
+
+            return "Không rõ biển số";
+        } catch (Exception e) {
+            Log.e(TAG, "Error extracting vehicle plate", e);
+            return "Lỗi biển số";
+        }
+    }
+
+    private String extractObjectId(JSONObject idObj) {
+        if (idObj == null) return null;
+        try {
+            // Kiểm tra các trường ID phổ biến
+            if (idObj.has("$oid")) {
+                return idObj.getString("$oid");
+            }
+            if (idObj.has("_id")) {
+                return idObj.getString("_id");
+            }
+            if (idObj.has("$id")) {
+                Object idValue = idObj.get("$id");
+                if (idValue instanceof String) return (String) idValue;
+                if (idValue instanceof JSONObject) {
+                    return extractObjectId((JSONObject) idValue);
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String extractTimeFromDate(JSONObject obj, String timeField) {
+        try {
+            if (!obj.has(timeField)) return null;
+
+            Object timeObj = obj.get(timeField);
+            if (timeObj instanceof String) {
+                return (String) timeObj;
+            } else if (timeObj instanceof JSONObject) {
+                JSONObject timeJson = (JSONObject) timeObj;
+                if (timeJson.has("$date")) {
+                    return timeJson.getString("$date");
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean isValidTimeString(String timeString) {
+        return timeString != null && !timeString.isEmpty() && !timeString.equals("null") && !timeString.trim().isEmpty();
+    }
+
+    private String extractDateFromTimestamp(Date timestamp) {
+        if (timestamp == null) return "";
+        try {
+            SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+            return dateFormat.format(timestamp);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void handleVolleyError(VolleyError error) {
+        String errorMessage = getErrorMessage(error);
+        Log.e(TAG, "Volley error: " + errorMessage, error);
+
+        runOnUiThread(() -> {
+            showStatsError("Không thể tải dữ liệu");
         });
+    }
+
+    private String getErrorMessage(VolleyError error) {
+        if (error instanceof TimeoutError) return "Timeout";
+        if (error instanceof NoConnectionError) return "No connection";
+        if (error instanceof NetworkError) return "Network error";
+        if (error instanceof ServerError) {
+            if (error.networkResponse != null) {
+                return "Server error (" + error.networkResponse.statusCode + ")";
+            }
+            return "Server error";
+        }
+        return "Unknown error";
     }
 
     private void updatePieChart(int availableSpots, int parkedCars) {
@@ -541,6 +656,7 @@ public class TrangChuActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         try {
+            if (requestQueue != null) requestQueue.cancelAll(this);
             if (uiUpdateHandler != null) {
                 uiUpdateHandler.removeCallbacksAndMessages(null);
                 uiUpdateHandler = null;

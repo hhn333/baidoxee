@@ -1,509 +1,743 @@
 package com.example.baidoxee;
 
+import android.content.Context;
 import android.util.Log;
 import android.widget.Toast;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
-import java.util.concurrent.TimeUnit;
 
 public class PaymentHelper {
+
     private static final String TAG = "PaymentHelper";
+    private Context context;
     private ThanhToanActivity activity;
 
-    public PaymentHelper(ThanhToanActivity activity) {
-        this.activity = activity;
+    public PaymentHelper(Context context) {
+        this.context = context;
+        if (context instanceof ThanhToanActivity) {
+            this.activity = (ThanhToanActivity) context;
+        }
     }
 
+    // PaymentData class for events and parkinglogs integration
     public static class PaymentData {
-        public String activityId, bienSoXe, thoiGianVao, thoiGianRa, eventEnterId, eventExitId, vehicleType, hinhThucThanhToan;
-        public long giaVe;
-        public boolean needsCheckoutUpdate;
+        public String parkingLogId;          // ID từ parkinglogs collection
+        public String bienSoXe;              // plate_text từ events collection
+        public String thoiGianVao;           // timeIn từ parkinglogs hoặc timestamp từ enter event
+        public String thoiGianRa;            // timeOut từ parkinglogs hoặc timestamp từ exit event
+        public long giaVe;                   // fee từ parkinglogs
+        public String eventEnterId;         // ID của enter event
+        public String eventExitId;          // ID của exit event
+        public String vehicleId;            // vehicle_id liên kết giữa events và parkinglogs
+        public String vehicleType;          // Loại xe
+        public String hinhThucThanhToan;    // Payment method
+        public String status;               // Status từ parkinglogs (IN_PROGRESS, COMPLETED, PAID)
+        public boolean needsPaymentDisplay; // true khi cần hiển thị thanh toán
+        public boolean needsCheckoutUpdate; // true khi cần cập nhật checkout
+
+        public PaymentData() {
+            this.parkingLogId = "";
+            this.bienSoXe = "";
+            this.thoiGianVao = "";
+            this.thoiGianRa = "";
+            this.giaVe = 0;
+            this.eventEnterId = "";
+            this.eventExitId = "";
+            this.vehicleId = "";
+            this.vehicleType = "CAR_UNDER_9";
+            this.hinhThucThanhToan = "tien_mat";
+            this.status = "IN_PROGRESS";
+            this.needsPaymentDisplay = false;
+            this.needsCheckoutUpdate = false;
+        }
     }
 
-    public static class EventsPaymentData {
-        public String activityId, bienSoXe, thoiGianVao, thoiGianRa, eventEnterId, eventExitId;
-        public String vehicleType, hinhThucThanhToan, parkingLogId, cameraId, spotName, locationName;
-        public String enterEventTimestamp, exitEventTimestamp;
-        public long giaVe;
-        public double plateConfidence;
-        public boolean hasParkingLog, needsUpdateParkingLog;
-    }
+    /**
+     * Xử lý dữ liệu thanh toán từ combined data (events + parkinglogs)
+     */
+    public PaymentData processPaymentDataFromCombined(JSONObject combinedData) throws JSONException {
+        PaymentData paymentData = new PaymentData();
 
-    public PaymentData processPaymentData(JSONObject data) throws JSONException {
-        PaymentData pd = new PaymentData();
-        pd.activityId = data.getString("_id");
-        pd.bienSoXe = data.getString("bienSoXe");
-        pd.thoiGianVao = data.getString("thoiGianVao");
-        pd.eventEnterId = data.optString("event_enter_id", null);
-        pd.eventExitId = data.optString("event_exit_id", null);
-        pd.vehicleType = data.optString("vehicleType", "CAR_UNDER_9");
-        pd.hinhThucThanhToan = data.optString("hinhThucThanhToan", "tien_mat");
+        Log.d(TAG, "Processing combined payment data: " + combinedData.toString());
 
-        if (data.has("thoiGianRa") && !data.isNull("thoiGianRa")) {
-            pd.thoiGianRa = data.getString("thoiGianRa");
-            pd.needsCheckoutUpdate = false;
-        } else {
-            pd.thoiGianRa = getCurrentTime();
-            pd.needsCheckoutUpdate = true;
+        // Extract basic info
+        paymentData.bienSoXe = combinedData.optString("plate_text", "");
+        paymentData.vehicleId = combinedData.optString("vehicle_id", "");
+
+        // Process events data
+        if (combinedData.has("events")) {
+            JSONObject eventsData = combinedData.getJSONObject("events");
+            processEventsData(paymentData, eventsData);
         }
 
-        pd.giaVe = data.has("giaVe") && !data.isNull("giaVe") ?
-                data.getLong("giaVe") :
-                calculateParkingFee(pd.thoiGianVao, pd.thoiGianRa, pd.vehicleType);
-
-        return pd;
-    }
-
-    public EventsPaymentData processEventsPaymentData(JSONObject data) throws JSONException {
-        EventsPaymentData epd = new EventsPaymentData();
-
-        // Xử lý enter event
-        if (data.has("enter_event") && !data.isNull("enter_event")) {
-            JSONObject enterEvent = data.getJSONObject("enter_event");
-            epd.bienSoXe = enterEvent.optString("plate_text");
-            epd.enterEventTimestamp = enterEvent.optString("timestamp");
-            epd.thoiGianVao = convertEventTimestamp(epd.enterEventTimestamp);
-            epd.eventEnterId = enterEvent.optString("_id");
-            epd.cameraId = enterEvent.optString("camera_id");
-            epd.spotName = enterEvent.optString("spot_name");
-            epd.locationName = enterEvent.optString("location_name");
-            epd.plateConfidence = enterEvent.optDouble("plate_confidence", 0.0);
-        } else {
-            epd.bienSoXe = data.optString("plate_text", data.optString("bienSoXe"));
-            epd.enterEventTimestamp = data.optString("enter_timestamp");
-            epd.thoiGianVao = data.optString("thoiGianVao", convertEventTimestamp(epd.enterEventTimestamp));
+        // Process parking logs data
+        if (combinedData.has("parking_logs")) {
+            JSONObject parkingLogsData = combinedData.getJSONObject("parking_logs");
+            processParkingLogsData(paymentData, parkingLogsData);
         }
 
-        // Xử lý exit event
-        if (data.has("exit_event") && !data.isNull("exit_event")) {
-            JSONObject exitEvent = data.getJSONObject("exit_event");
-            epd.exitEventTimestamp = exitEvent.optString("timestamp");
-            epd.thoiGianRa = convertEventTimestamp(epd.exitEventTimestamp);
-            epd.eventExitId = exitEvent.optString("_id");
-        } else {
-            epd.exitEventTimestamp = data.optString("exit_timestamp");
-            epd.thoiGianRa = data.optString("thoiGianRa",
-                    epd.exitEventTimestamp != null ? convertEventTimestamp(epd.exitEventTimestamp) : getCurrentTime());
-            if (epd.thoiGianRa.equals(getCurrentTime())) epd.needsUpdateParkingLog = true;
-        }
+        // Set defaults and validate
+        validateAndSetDefaults(paymentData);
 
-        epd.eventEnterId = data.optString("event_enter_id", epd.eventEnterId);
-        epd.eventExitId = data.optString("event_exit_id", epd.eventExitId);
-        epd.parkingLogId = data.optString("parking_log_id");
-        epd.hasParkingLog = data.optBoolean("has_parking_log", !epd.parkingLogId.isEmpty());
-        epd.activityId = epd.hasParkingLog && !epd.parkingLogId.isEmpty() ? epd.parkingLogId : epd.eventEnterId;
-        epd.vehicleType = data.optString("vehicleType", data.optString("vehicle_type", detectVehicleTypeFromPlate(epd.bienSoXe)));
-        epd.hinhThucThanhToan = data.optString("hinhThucThanhToan", data.optString("payment_method", "tien_mat"));
-        epd.giaVe = data.optLong("giaVe", data.optLong("fee",
-                calculateParkingFeeFromEventTimestamps(epd.enterEventTimestamp, epd.exitEventTimestamp, epd.vehicleType)));
+        Log.d(TAG, "Processed combined payment data:");
+        logPaymentData(paymentData);
 
-        if (!epd.hasParkingLog) epd.needsUpdateParkingLog = true;
-
-        return epd;
+        return paymentData;
     }
 
-    private String convertEventTimestamp(String timestamp) {
-        if (timestamp == null || timestamp.isEmpty()) return getCurrentTime();
+    /**
+     * Xử lý dữ liệu từ parkinglogs collection với events populated
+     */
+    public PaymentData processPaymentDataFromParkinglogs(JSONObject parkingLogData) throws JSONException {
+        PaymentData paymentData = new PaymentData();
 
-        try {
-            if (timestamp.contains("T")) return timestamp.endsWith("Z") ? timestamp : timestamp + "Z";
+        Log.d(TAG, "Processing parking log data: " + parkingLogData.toString());
 
-            if (timestamp.matches("\\d+")) {
-                long ts = Long.parseLong(timestamp);
-                if (timestamp.length() == 10) ts *= 1000;
-                return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()).format(new Date(ts));
+        // ID từ parkinglogs collection
+        paymentData.parkingLogId = parkingLogData.optString("_id", "");
+        paymentData.vehicleId = parkingLogData.optString("vehicle_id", "");
+
+        // Extract enter event data (populated)
+        if (parkingLogData.has("event_enter_id") && !parkingLogData.isNull("event_enter_id")) {
+            JSONObject enterEvent = parkingLogData.getJSONObject("event_enter_id");
+            paymentData.bienSoXe = enterEvent.optString("plate_text", "");
+            paymentData.eventEnterId = enterEvent.optString("_id", "");
+
+            // Use enter event timestamp if parking log timeIn is empty
+            if (parkingLogData.optString("timeIn", "").isEmpty()) {
+                paymentData.thoiGianVao = formatDateTime(enterEvent.optString("timestamp", ""));
+            }
+        }
+
+        // Extract exit event data (populated)
+        if (parkingLogData.has("event_exit_id") && !parkingLogData.isNull("event_exit_id")) {
+            if (parkingLogData.get("event_exit_id") instanceof JSONObject) {
+                JSONObject exitEvent = parkingLogData.getJSONObject("event_exit_id");
+                paymentData.eventExitId = exitEvent.optString("_id", "");
+
+                // Use exit event timestamp if parking log timeOut is empty
+                if (parkingLogData.optString("timeOut", "").isEmpty()) {
+                    paymentData.thoiGianRa = formatDateTime(exitEvent.optString("timestamp", ""));
+                }
+            } else {
+                paymentData.eventExitId = parkingLogData.optString("event_exit_id", "");
+            }
+        }
+
+        // Thời gian từ parking logs (ưu tiên hơn events)
+        String timeIn = parkingLogData.optString("timeIn", "");
+        String timeOut = parkingLogData.optString("timeOut", "");
+
+        if (!timeIn.isEmpty()) {
+            paymentData.thoiGianVao = formatDateTime(timeIn);
+        }
+        if (!timeOut.isEmpty()) {
+            paymentData.thoiGianRa = formatDateTime(timeOut);
+        }
+
+        // Giá vé từ parkinglogs
+        paymentData.giaVe = parkingLogData.optLong("fee", 0);
+
+        // Vehicle type
+        paymentData.vehicleType = parkingLogData.optString("vehicleType", "CAR_UNDER_9");
+
+        // Payment method
+        String paymentMethod = parkingLogData.optString("paymentMethod", "CASH");
+        paymentData.hinhThucThanhToan = "BANK_TRANSFER".equals(paymentMethod) ? "chuyen_khoan" : "tien_mat";
+
+        // Status từ parkinglogs
+        paymentData.status = parkingLogData.optString("status", "IN_PROGRESS");
+
+        // Determine if needs payment display
+        paymentData.needsPaymentDisplay = "COMPLETED".equals(paymentData.status) &&
+                !"PAID".equals(parkingLogData.optString("paymentStatus", ""));
+
+        // Check if needs checkout update
+        paymentData.needsCheckoutUpdate = paymentData.thoiGianRa.isEmpty() &&
+                "IN_PROGRESS".equals(paymentData.status);
+
+        validateAndSetDefaults(paymentData);
+        logPaymentData(paymentData);
+
+        return paymentData;
+    }
+
+    /**
+     * Xử lý dữ liệu events trong combined data
+     */
+    private void processEventsData(PaymentData paymentData, JSONObject eventsData) throws JSONException {
+        if (eventsData.has("data") && eventsData.get("data") instanceof JSONArray) {
+            JSONArray events = eventsData.getJSONArray("data");
+
+            JSONObject latestEnter = null;
+            JSONObject latestExit = null;
+
+            // Tìm enter và exit event mới nhất
+            for (int i = 0; i < events.length(); i++) {
+                JSONObject event = events.getJSONObject(i);
+                String eventType = event.optString("event_type", "").toUpperCase();
+                String timestamp = event.optString("timestamp", "");
+
+                if ("ENTER".equals(eventType)) {
+                    if (latestEnter == null || timestamp.compareTo(latestEnter.optString("timestamp", "")) > 0) {
+                        latestEnter = event;
+                    }
+                } else if ("EXIT".equals(eventType)) {
+                    if (latestExit == null || timestamp.compareTo(latestExit.optString("timestamp", "")) > 0) {
+                        latestExit = event;
+                    }
+                }
             }
 
-            SimpleDateFormat[] formats = {
-                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()),
-                    new SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()),
-                    new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-            };
-
-            for (SimpleDateFormat format : formats) {
-                try {
-                    Date date = format.parse(timestamp);
-                    return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()).format(date);
-                } catch (Exception ignored) {}
+            // Set event IDs and timestamps
+            if (latestEnter != null) {
+                paymentData.eventEnterId = latestEnter.optString("_id", "");
+                if (paymentData.thoiGianVao.isEmpty()) {
+                    paymentData.thoiGianVao = formatDateTime(latestEnter.optString("timestamp", ""));
+                }
+                if (paymentData.bienSoXe.isEmpty()) {
+                    paymentData.bienSoXe = latestEnter.optString("plate_text", "");
+                }
+                if (paymentData.vehicleId.isEmpty()) {
+                    paymentData.vehicleId = latestEnter.optString("vehicle_id", "");
+                }
             }
-            return timestamp;
-        } catch (Exception e) {
-            Log.e(TAG, "Error converting timestamp: " + timestamp, e);
-            return getCurrentTime();
+
+            if (latestExit != null) {
+                paymentData.eventExitId = latestExit.optString("_id", "");
+                if (paymentData.thoiGianRa.isEmpty()) {
+                    paymentData.thoiGianRa = formatDateTime(latestExit.optString("timestamp", ""));
+                }
+            }
         }
     }
 
-    private long calculateParkingFeeFromEventTimestamps(String enterTs, String exitTs, String vehicleType) {
-        if (enterTs == null || enterTs.isEmpty()) return getDefaultFeeByVehicleType(vehicleType);
-        String timeOut = exitTs != null && !exitTs.isEmpty() ? exitTs : getCurrentTime();
+    /**
+     * Xử lý dữ liệu parking logs trong combined data
+     */
+    private void processParkingLogsData(PaymentData paymentData, JSONObject parkingLogsData) throws JSONException {
+        if (parkingLogsData.has("data") && parkingLogsData.get("data") instanceof JSONArray) {
+            JSONArray parkingLogs = parkingLogsData.getJSONArray("data");
 
-        try {
-            return calculateParkingFee(convertEventTimestamp(enterTs), convertEventTimestamp(timeOut), vehicleType);
-        } catch (Exception e) {
-            return getDefaultFeeByVehicleType(vehicleType);
+            // Lấy parking log mới nhất
+            if (parkingLogs.length() > 0) {
+                JSONObject latestLog = parkingLogs.getJSONObject(0);
+
+                paymentData.parkingLogId = latestLog.optString("_id", "");
+                paymentData.giaVe = latestLog.optLong("fee", 0);
+                paymentData.status = latestLog.optString("status", "IN_PROGRESS");
+
+                // Override timestamps if available in parking log
+                String timeIn = latestLog.optString("timeIn", "");
+                String timeOut = latestLog.optString("timeOut", "");
+
+                if (!timeIn.isEmpty()) {
+                    paymentData.thoiGianVao = formatDateTime(timeIn);
+                }
+                if (!timeOut.isEmpty()) {
+                    paymentData.thoiGianRa = formatDateTime(timeOut);
+                }
+
+                // Payment method
+                String paymentMethod = latestLog.optString("paymentMethod", "CASH");
+                paymentData.hinhThucThanhToan = "BANK_TRANSFER".equals(paymentMethod) ? "chuyen_khoan" : "tien_mat";
+            }
+        } else if (parkingLogsData.has("_id")) {
+            // Single parking log object
+            paymentData.parkingLogId = parkingLogsData.optString("_id", "");
+            paymentData.giaVe = parkingLogsData.optLong("fee", 0);
+            paymentData.status = parkingLogsData.optString("status", "IN_PROGRESS");
+
+            String timeIn = parkingLogsData.optString("timeIn", "");
+            String timeOut = parkingLogsData.optString("timeOut", "");
+
+            if (!timeIn.isEmpty()) {
+                paymentData.thoiGianVao = formatDateTime(timeIn);
+            }
+            if (!timeOut.isEmpty()) {
+                paymentData.thoiGianRa = formatDateTime(timeOut);
+            }
+
+            String paymentMethod = parkingLogsData.optString("paymentMethod", "CASH");
+            paymentData.hinhThucThanhToan = "BANK_TRANSFER".equals(paymentMethod) ? "chuyen_khoan" : "tien_mat";
         }
     }
 
-    private String detectVehicleTypeFromPlate(String plate) {
-        if (plate == null || plate.isEmpty()) return "CAR_UNDER_9";
-        plate = plate.toUpperCase().trim();
-
-        if (plate.matches("\\d{2}[A-Z]\\d-\\d{4,5}") || plate.matches("\\d{2}[A-Z]\\d{4,5}")) return "MOTORCYCLE";
-        if (plate.matches("\\d{2}[A-Z]-\\d{3}\\.\\d{2}") || plate.contains("LD") || plate.contains("MD")) return "TRUCK";
-        return "CAR_UNDER_9";
-    }
-
-    private long getDefaultFeeByVehicleType(String vehicleType) {
-        switch (vehicleType) {
-            case "CAR_9_TO_16": return 5000;
-            case "MOTORCYCLE": return 2000;
-            case "TRUCK":
-            case "BUS": return 8000;
-            default: return 3000;
+    /**
+     * Validate và set default values
+     */
+    private void validateAndSetDefaults(PaymentData paymentData) {
+        if (paymentData.vehicleType.isEmpty()) {
+            paymentData.vehicleType = "CAR_UNDER_9";
         }
+
+        if (paymentData.hinhThucThanhToan.isEmpty()) {
+            paymentData.hinhThucThanhToan = "tien_mat";
+        }
+
+        if (paymentData.status.isEmpty()) {
+            paymentData.status = "IN_PROGRESS";
+        }
+
+        // Determine payment display need
+        paymentData.needsPaymentDisplay = "COMPLETED".equals(paymentData.status) ||
+                (!paymentData.thoiGianRa.isEmpty() && paymentData.giaVe > 0);
+
+        // Determine checkout update need
+        paymentData.needsCheckoutUpdate = paymentData.thoiGianRa.isEmpty() &&
+                "IN_PROGRESS".equals(paymentData.status) &&
+                !paymentData.eventExitId.isEmpty();
     }
 
-    public void updatePaymentMethodFromEvents(String activityId, String eventEnterId, String eventExitId,
-                                              String vehicleType, String parkingLogId, String phuongThuc, boolean hasParkingLog) {
-        if (eventEnterId == null || eventEnterId.isEmpty()) return;
+    /**
+     * Log payment data for debugging
+     */
+    private void logPaymentData(PaymentData paymentData) {
+        Log.d(TAG, "=== PAYMENT DATA ===");
+        Log.d(TAG, "Parking Log ID: " + paymentData.parkingLogId);
+        Log.d(TAG, "Vehicle ID: " + paymentData.vehicleId);
+        Log.d(TAG, "Biển số xe: " + paymentData.bienSoXe);
+        Log.d(TAG, "Event Enter ID: " + paymentData.eventEnterId);
+        Log.d(TAG, "Event Exit ID: " + paymentData.eventExitId);
+        Log.d(TAG, "Thời gian vào: " + paymentData.thoiGianVao);
+        Log.d(TAG, "Thời gian ra: " + paymentData.thoiGianRa);
+        Log.d(TAG, "Giá vé: " + paymentData.giaVe);
+        Log.d(TAG, "Vehicle type: " + paymentData.vehicleType);
+        Log.d(TAG, "Payment method: " + paymentData.hinhThucThanhToan);
+        Log.d(TAG, "Status: " + paymentData.status);
+        Log.d(TAG, "Needs payment display: " + paymentData.needsPaymentDisplay);
+        Log.d(TAG, "Needs checkout update: " + paymentData.needsCheckoutUpdate);
+        Log.d(TAG, "==================");
+    }
+
+    /**
+     * Cập nhật payment method trong parkinglogs
+     */
+    public void updatePaymentMethod(String parkingLogId, String eventEnterId, String vehicleType, String paymentMethod) {
+        if (parkingLogId == null || parkingLogId.isEmpty()) {
+            Log.w(TAG, "Cannot update payment method: parkingLogId is empty");
+            return;
+        }
 
         try {
             JSONObject updateData = new JSONObject();
-            updateData.put("hinhThucThanhToan", phuongThuc);
-            updateData.put("thoiGianChonPhuongThuc", getCurrentTime());
-            updateData.put("event_enter_id", eventEnterId);
-            if (eventExitId != null) updateData.put("event_exit_id", eventExitId);
-            if (vehicleType != null) updateData.put("vehicleType", vehicleType);
-            updateData.put("dataSource", "events_collection");
-            updateData.put("hasParkingLog", hasParkingLog);
+            updateData.put("paymentMethod", paymentMethod.equals("chuyen_khoan") ? "BANK_TRANSFER" : "CASH");
+            updateData.put("vehicleType", vehicleType);
+            updateData.put("updatedAt", getCurrentDateTime());
 
-            String updateId = hasParkingLog && parkingLogId != null ? parkingLogId : activityId;
+            Log.d(TAG, "Updating payment method in parking log: " + updateData.toString());
 
-            ApiHelper.updateActivity(updateId, updateData.toString(), new ApiHelper.OnResponseListener() {
+            ApiHelper.updateParkingLogWithResponse(parkingLogId, updateData.toString(), new ApiHelper.OnResponseListener() {
                 @Override
                 public void onSuccess(String response) {
-                    activity.runOnUiThread(() -> {
-                        String text = phuongThuc.equals("tien_mat") ? "Tiền mặt" : "Chuyển khoản";
-                        Toast.makeText(activity, "✅ Đã chọn: " + text + " (Events Data)", Toast.LENGTH_SHORT).show();
-                    });
+                    Log.d(TAG, "Payment method updated successfully: " + response);
                 }
 
                 @Override
-                public void onError(String error) {
-                    activity.runOnUiThread(() ->
-                            Toast.makeText(activity, "Lỗi cập nhật: " + error, Toast.LENGTH_SHORT).show());
+                public void onError(String errorMessage) {
+                    Log.e(TAG, "Failed to update payment method: " + errorMessage);
                 }
             });
         } catch (JSONException e) {
-            Log.e(TAG, "Error updating payment method", e);
+            Log.e(TAG, "Error creating payment method update data", e);
         }
     }
 
-    public void updateOrCreateParkingLogFromEvents(String eventEnterId, String eventExitId,
-                                                   String thoiGianVao, String thoiGianRa, long giaVe,
-                                                   String vehicleType, String parkingLogId, boolean hasParkingLog) {
+    /**
+     * Cập nhật vehicle checkout trong parkinglogs
+     */
+    public void updateVehicleCheckoutInParkinglogs(String parkingLogId, String timeOut, long fee, String eventExitId, String vehicleType) {
+        if (parkingLogId == null || parkingLogId.isEmpty()) {
+            Log.w(TAG, "Cannot update checkout: parkingLogId is empty");
+            return;
+        }
+
         try {
             JSONObject updateData = new JSONObject();
-            updateData.put("event_enter_id", eventEnterId);
-            if (eventExitId != null) updateData.put("event_exit_id", eventExitId);
-            updateData.put("timeIn", thoiGianVao);
-            if (thoiGianRa != null) {
-                updateData.put("timeOut", thoiGianRa);
-                updateData.put("status", "COMPLETED");
-            } else {
-                updateData.put("status", "IN_PROGRESS");
+            if (!timeOut.isEmpty()) {
+                updateData.put("timeOut", convertToISOFormat(timeOut));
             }
-            updateData.put("fee", giaVe);
+            if (fee > 0) {
+                updateData.put("fee", fee);
+            }
+            if (!eventExitId.isEmpty()) {
+                updateData.put("event_exit_id", eventExitId);
+            }
+            updateData.put("status", "COMPLETED");
             updateData.put("vehicleType", vehicleType);
-            updateData.put("dataSource", "events_collection");
-            updateData.put("lastUpdated", getCurrentTime());
+            updateData.put("updatedAt", getCurrentDateTime());
 
-            if (hasParkingLog && parkingLogId != null) {
-                ApiHelper.updateActivity(parkingLogId, updateData.toString(), new ApiHelper.OnResponseListener() {
-                    @Override
-                    public void onSuccess(String response) {
-                        Log.d(TAG, "Parking log updated from events");
+            Log.d(TAG, "Updating vehicle checkout in parking log: " + updateData.toString());
+
+            ApiHelper.updateParkingLogWithResponse(parkingLogId, updateData.toString(), new ApiHelper.OnResponseListener() {
+                @Override
+                public void onSuccess(String response) {
+                    Log.d(TAG, "Vehicle checkout updated successfully: " + response);
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    Log.e(TAG, "Failed to update checkout: " + errorMessage);
+                }
+            });
+        } catch (JSONException e) {
+            Log.e(TAG, "Error creating checkout update data", e);
+        }
+    }
+
+    /**
+     * Xử lý thanh toán và in hóa đơn
+     */
+    public void processPaymentAndPrint(String parkingLogId, String bienSoXe, String thoiGianVao,
+                                       String thoiGianRa, long giaVe, String hinhThucThanhToan,
+                                       String eventEnterId, String vehicleType) {
+
+        if (activity != null) {
+            activity.setButtonProcessing();
+        }
+
+        Log.d(TAG, "Processing payment and printing invoice:");
+        Log.d(TAG, "- Parking Log ID: " + parkingLogId);
+        Log.d(TAG, "- Biển số: " + bienSoXe);
+        Log.d(TAG, "- Thời gian vào: " + thoiGianVao);
+        Log.d(TAG, "- Thời gian ra: " + thoiGianRa);
+        Log.d(TAG, "- Giá vé: " + giaVe);
+        Log.d(TAG, "- Hình thức thanh toán: " + hinhThucThanhToan);
+
+        try {
+            JSONObject paymentData = new JSONObject();
+            paymentData.put("paymentStatus", "PAID");
+            paymentData.put("paymentMethod", hinhThucThanhToan.equals("chuyen_khoan") ? "BANK_TRANSFER" : "CASH");
+            paymentData.put("paymentTime", getCurrentDateTime());
+            paymentData.put("vehicleType", vehicleType);
+            paymentData.put("fee", giaVe);
+            paymentData.put("status", "COMPLETED");
+
+            // Cập nhật parking log với thông tin thanh toán
+            ApiHelper.updateParkingLogWithPayment(parkingLogId, paymentData.toString(), new ApiHelper.OnResponseListener() {
+                @Override
+                public void onSuccess(String response) {
+                    Log.d(TAG, "Payment processed successfully: " + response);
+
+                    // Proceed to print invoice
+                    processInvoicePrint(bienSoXe, thoiGianVao, thoiGianRa, giaVe, hinhThucThanhToan, parkingLogId);
+                }
+
+                @Override
+                public void onError(String errorMessage) {
+                    Log.e(TAG, "Payment processing failed: " + errorMessage);
+
+                    if (activity != null) {
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                activity.resetButton();
+                                Toast.makeText(context, "Lỗi xử lý thanh toán: " + errorMessage, Toast.LENGTH_LONG).show();
+                            }
+                        });
                     }
+                }
+            });
 
+        } catch (JSONException e) {
+            Log.e(TAG, "Error creating payment data", e);
+
+            if (activity != null) {
+                activity.runOnUiThread(new Runnable() {
                     @Override
-                    public void onError(String error) {
-                        Log.e(TAG, "Failed to update parking log: " + error);
+                    public void run() {
+                        activity.resetButton();
+                        Toast.makeText(context, "Lỗi tạo dữ liệu thanh toán", Toast.LENGTH_SHORT).show();
                     }
                 });
             }
-        } catch (JSONException e) {
-            Log.e(TAG, "Error updating parking log", e);
         }
     }
 
-    public void processPaymentAndPrintFromEvents(String activityId, String bienSoXe, String thoiGianVao,
-                                                 String thoiGianRa, long giaVe, String hinhThucThanhToan,
-                                                 String eventEnterId, String eventExitId, String vehicleType,
-                                                 String parkingLogId, boolean hasParkingLog) {
-        String paymentMethodText = hinhThucThanhToan.equals("tien_mat") ? "Tiền mặt" : "Chuyển khoản";
-
-        try {
-            JSONObject updateData = new JSONObject();
-            updateData.put("trangThaiThanhToan", "da_thanh_toan");
-            updateData.put("thoiGianThanhToan", getCurrentTime());
-            updateData.put("hinhThucThanhToan", hinhThucThanhToan);
-            updateData.put("giaVe", giaVe);
-            updateData.put("event_enter_id", eventEnterId);
-            if (eventExitId != null) updateData.put("event_exit_id", eventExitId);
-            if (vehicleType != null) updateData.put("vehicleType", vehicleType);
-            updateData.put("dataSource", "events_collection");
-            updateData.put("hasParkingLog", hasParkingLog);
-
-            activity.setButtonProcessing();
-            String updateId = hasParkingLog && parkingLogId != null ? parkingLogId : activityId;
-
-            ApiHelper.updateActivity(updateId, updateData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    sendPrintCommandFromEvents(activityId, bienSoXe, thoiGianVao, thoiGianRa,
-                            giaVe, eventEnterId, eventExitId, vehicleType, paymentMethodText, parkingLogId, hasParkingLog);
-                }
-
-                @Override
-                public void onError(String error) {
-                    activity.runOnUiThread(() -> {
-                        Toast.makeText(activity, "Lỗi cập nhật thanh toán: " + error, Toast.LENGTH_LONG).show();
-                        activity.resetButton();
-                    });
-                }
-            });
-        } catch (JSONException e) {
-            Log.e(TAG, "Error processing payment", e);
-            activity.resetButton();
-        }
-    }
-
-    private void sendPrintCommandFromEvents(String activityId, String bienSoXe, String thoiGianVao,
-                                            String thoiGianRa, long giaVe, String eventEnterId, String eventExitId,
-                                            String vehicleType, String paymentMethodText, String parkingLogId, boolean hasParkingLog) {
+    /**
+     * Xử lý in hóa đơn
+     */
+    private void processInvoicePrint(String bienSoXe, String thoiGianVao, String thoiGianRa,
+                                     long giaVe, String hinhThucThanhToan, String parkingLogId) {
         try {
             JSONObject printData = new JSONObject();
             printData.put("bienSoXe", bienSoXe);
-            printData.put("loaiXe", getDisplayVehicleType(vehicleType));
-            printData.put("thoiGianVao", formatDisplayTime(thoiGianVao));
-            printData.put("thoiGianRa", formatDisplayTime(thoiGianRa));
+            printData.put("plateNumber", bienSoXe); // Alternative field name
+            printData.put("thoiGianVao", thoiGianVao);
+            printData.put("timeIn", thoiGianVao);
+            printData.put("thoiGianRa", thoiGianRa);
+            printData.put("timeOut", thoiGianRa);
             printData.put("giaVe", giaVe);
-            printData.put("hinhThucThanhToan", paymentMethodText);
-            printData.put("activityId", activityId);
-            printData.put("eventEnterId", eventEnterId);
-            if (eventExitId != null) printData.put("eventExitId", eventExitId);
-            printData.put("vehicleType", vehicleType);
-            if (hasParkingLog && parkingLogId != null) printData.put("parkingLogId", parkingLogId);
-            printData.put("dataSource", "events_collection");
-            printData.put("timestamp", System.currentTimeMillis());
+            printData.put("fee", giaVe);
+            printData.put("hinhThucThanhToan", hinhThucThanhToan);
+            printData.put("paymentMethod", hinhThucThanhToan.equals("chuyen_khoan") ? "BANK_TRANSFER" : "CASH");
+            printData.put("thoiGianIn", getCurrentDateTime());
+            printData.put("printTime", getCurrentDateTime());
+            printData.put("parkingLogId", parkingLogId);
+            printData.put("source", "parkinglogs");
 
-            ApiHelper.sendPrintCommand(printData.toString(), new ApiHelper.OnResponseListener() {
+            Log.d(TAG, "Printing invoice with data: " + printData.toString());
+
+            ApiHelper.printInvoiceWithResponse(printData.toString(), new ApiHelper.OnResponseListener() {
                 @Override
                 public void onSuccess(String response) {
-                    activity.runOnUiThread(() -> {
-                        Toast.makeText(activity, "✅ Thanh toán thành công! (Events Data)", Toast.LENGTH_LONG).show();
-                        activity.showSuccessDialogFromEvents(bienSoXe, thoiGianVao, thoiGianRa, giaVe, paymentMethodText, eventEnterId, eventExitId);
-                        activity.resetButton();
-                    });
+                    Log.d(TAG, "Invoice printed successfully: " + response);
+
+                    if (activity != null) {
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                activity.resetButton();
+
+                                String paymentMethodText = hinhThucThanhToan.equals("chuyen_khoan") ?
+                                        "Chuyển khoản" : "Tiền mặt";
+
+                                activity.showSuccessDialog(bienSoXe, thoiGianVao, thoiGianRa, giaVe, paymentMethodText);
+
+                                // Reset dữ liệu activity sau khi thanh toán thành công
+                                activity.resetActivityData();
+                            }
+                        });
+                    }
                 }
 
                 @Override
-                public void onError(String error) {
-                    activity.runOnUiThread(() -> {
-                        Toast.makeText(activity, "Thanh toán thành công nhưng lỗi in: " + error, Toast.LENGTH_LONG).show();
-                        activity.showSuccessDialogFromEvents(bienSoXe, thoiGianVao, thoiGianRa, giaVe, paymentMethodText, eventEnterId, eventExitId);
-                        activity.resetButton();
-                    });
+                public void onError(String errorMessage) {
+                    Log.e(TAG, "Invoice printing failed: " + errorMessage);
+
+                    if (activity != null) {
+                        activity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                activity.resetButton();
+                                Toast.makeText(context, "Thanh toán thành công nhưng in hóa đơn lỗi: " + errorMessage,
+                                        Toast.LENGTH_LONG).show();
+
+                                // Still reset data even if printing failed
+                                activity.resetActivityData();
+                            }
+                        });
+                    }
                 }
             });
+
         } catch (JSONException e) {
             Log.e(TAG, "Error creating print data", e);
-            activity.resetButton();
-        }
-    }
 
-    // Legacy methods for parking_logs compatibility
-    public void updatePaymentMethod(String activityId, String eventEnterId, String vehicleType, String phuongThuc) {
-        if (activityId == null || activityId.isEmpty()) return;
-
-        try {
-            JSONObject updateData = new JSONObject();
-            updateData.put("hinhThucThanhToan", phuongThuc);
-            updateData.put("thoiGianChonPhuongThuc", getCurrentTime());
-            if (eventEnterId != null) updateData.put("event_enter_id", eventEnterId);
-            if (vehicleType != null) updateData.put("vehicleType", vehicleType);
-
-            ApiHelper.updateActivity(activityId, updateData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    activity.runOnUiThread(() -> {
-                        String text = phuongThuc.equals("tien_mat") ? "Tiền mặt" : "Chuyển khoản";
-                        Toast.makeText(activity, "Đã chọn: " + text, Toast.LENGTH_SHORT).show();
-                    });
-                }
-
-                @Override
-                public void onError(String error) {
-                    activity.runOnUiThread(() ->
-                            Toast.makeText(activity, "Lỗi cập nhật: " + error, Toast.LENGTH_SHORT).show());
-                }
-            });
-        } catch (JSONException e) {
-            Log.e(TAG, "Error updating payment method", e);
-        }
-    }
-
-    public void processPaymentAndPrint(String activityId, String bienSoXe, String thoiGianVao,
-                                       String thoiGianRa, long giaVe, String hinhThucThanhToan,
-                                       String eventEnterId, String vehicleType) {
-        String paymentMethodText = hinhThucThanhToan.equals("tien_mat") ? "Tiền mặt" : "Chuyển khoản";
-
-        try {
-            JSONObject updateData = new JSONObject();
-            updateData.put("trangThaiThanhToan", "da_thanh_toan");
-            updateData.put("thoiGianThanhToan", getCurrentTime());
-            updateData.put("hinhThucThanhToan", hinhThucThanhToan);
-            updateData.put("giaVe", giaVe);
-            if (eventEnterId != null) updateData.put("event_enter_id", eventEnterId);
-            if (vehicleType != null) updateData.put("vehicleType", vehicleType);
-
-            activity.setButtonProcessing();
-
-            ApiHelper.updateActivity(activityId, updateData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    sendPrintCommand(activityId, bienSoXe, thoiGianVao, thoiGianRa, giaVe, eventEnterId, vehicleType, paymentMethodText);
-                }
-
-                @Override
-                public void onError(String error) {
-                    activity.runOnUiThread(() -> {
-                        Toast.makeText(activity, "Lỗi cập nhật: " + error, Toast.LENGTH_LONG).show();
+            if (activity != null) {
+                activity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
                         activity.resetButton();
-                    });
-                }
-            });
-        } catch (JSONException e) {
-            Log.e(TAG, "Error processing payment", e);
-            activity.resetButton();
-        }
-    }
-
-    private void sendPrintCommand(String activityId, String bienSoXe, String thoiGianVao, String thoiGianRa,
-                                  long giaVe, String eventEnterId, String vehicleType, String paymentMethodText) {
-        try {
-            JSONObject printData = new JSONObject();
-            printData.put("bienSoXe", bienSoXe);
-            printData.put("loaiXe", getDisplayVehicleType(vehicleType));
-            printData.put("thoiGianVao", formatDisplayTime(thoiGianVao));
-            printData.put("thoiGianRa", formatDisplayTime(thoiGianRa));
-            printData.put("giaVe", giaVe);
-            printData.put("hinhThucThanhToan", paymentMethodText);
-            printData.put("activityId", activityId);
-            if (eventEnterId != null) printData.put("eventEnterId", eventEnterId);
-            if (vehicleType != null) printData.put("vehicleType", vehicleType);
-            printData.put("dataSource", "parking_logs_collection");
-            printData.put("timestamp", System.currentTimeMillis());
-
-            ApiHelper.sendPrintCommand(printData.toString(), new ApiHelper.OnResponseListener() {
-                @Override
-                public void onSuccess(String response) {
-                    activity.runOnUiThread(() -> {
-                        Toast.makeText(activity, "Thanh toán thành công!", Toast.LENGTH_LONG).show();
-                        activity.showSuccessDialog(bienSoXe, thoiGianVao, thoiGianRa, giaVe, paymentMethodText);
-                        activity.resetButton();
-                    });
-                }
-
-                @Override
-                public void onError(String error) {
-                    activity.runOnUiThread(() -> {
-                        Toast.makeText(activity, "Thanh toán thành công nhưng lỗi in: " + error, Toast.LENGTH_LONG).show();
-                        activity.showSuccessDialog(bienSoXe, thoiGianVao, thoiGianRa, giaVe, paymentMethodText);
-                        activity.resetButton();
-                    });
-                }
-            });
-        } catch (JSONException e) {
-            Log.e(TAG, "Error creating print data", e);
-            activity.resetButton();
-        }
-    }
-
-    private long calculateParkingFee(String thoiGianVao, String thoiGianRa, String vehicleType) {
-        try {
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault());
-            Date dateVao = sdf.parse(thoiGianVao);
-            Date dateRa = sdf.parse(thoiGianRa);
-
-            if (dateVao != null && dateRa != null) {
-                long diffInMinutes = TimeUnit.MILLISECONDS.toMinutes(dateRa.getTime() - dateVao.getTime());
-                if (diffInMinutes < 0) diffInMinutes = 0;
-
-                long basePrice, blockPrice;
-                switch (vehicleType) {
-                    case "CAR_9_TO_16": basePrice = 5000; blockPrice = 3000; break;
-                    case "MOTORCYCLE": basePrice = 2000; blockPrice = 1000; break;
-                    case "TRUCK":
-                    case "BUS": basePrice = 8000; blockPrice = 5000; break;
-                    default: basePrice = 3000; blockPrice = 2000; break;
-                }
-
-                long gia = basePrice;
-                if (diffInMinutes > 30) {
-                    long extraBlocks = (diffInMinutes - 30 + 29) / 30;
-                    gia += extraBlocks * blockPrice;
-                }
-                return gia;
+                        Toast.makeText(context, "Thanh toán thành công nhưng lỗi tạo hóa đơn", Toast.LENGTH_SHORT).show();
+                    }
+                });
             }
+        }
+    }
+
+    /**
+     * Tính phí đỗ xe dựa trên thời gian
+     */
+    public static long calculateParkingFee(String timeIn, String timeOut, String vehicleType) {
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault());
+            Date dateIn = sdf.parse(timeIn);
+            Date dateOut = sdf.parse(timeOut);
+
+            if (dateIn == null || dateOut == null) {
+                return 0;
+            }
+
+            long diffInMillis = dateOut.getTime() - dateIn.getTime();
+            long diffInHours = diffInMillis / (1000 * 60 * 60);
+
+            // Làm tròn lên giờ
+            if (diffInMillis % (1000 * 60 * 60) > 0) {
+                diffInHours++;
+            }
+
+            // Phí theo loại xe (có thể tùy chỉnh)
+            long hourlyRate = getHourlyRate(vehicleType);
+
+            return Math.max(diffInHours * hourlyRate, hourlyRate); // Minimum 1 hour
+
         } catch (Exception e) {
-            Log.e(TAG, "Error calculating fee", e);
+            Log.e(TAG, "Error calculating parking fee", e);
+            return 0;
         }
-        return getDefaultFeeByVehicleType(vehicleType);
     }
 
-    private String getCurrentTime() {
-        return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()).format(new Date());
+    /**
+     * Lấy giá theo giờ dựa trên loại xe
+     */
+    private static long getHourlyRate(String vehicleType) {
+        switch (vehicleType) {
+            case "MOTORBIKE":
+                return 5000; // 5k/hour for motorbikes
+            case "CAR_UNDER_9":
+                return 10000; // 10k/hour for cars under 9 seats
+            case "CAR_OVER_9":
+                return 15000; // 15k/hour for cars over 9 seats
+            case "TRUCK":
+                return 20000; // 20k/hour for trucks
+            default:
+                return 10000; // Default rate
+        }
     }
 
-    private String formatDisplayTime(String timeString) {
-        if (timeString == null || timeString.isEmpty()) return "N/A";
+    /**
+     * Validate payment data
+     */
+    public static boolean validatePaymentData(PaymentData paymentData) {
+        if (paymentData == null) {
+            Log.e(TAG, "Payment data is null");
+            return false;
+        }
+
+        if (paymentData.bienSoXe.isEmpty()) {
+            Log.e(TAG, "License plate is empty");
+            return false;
+        }
+
+        if (paymentData.vehicleId.isEmpty() && paymentData.eventEnterId.isEmpty()) {
+            Log.e(TAG, "Both vehicle ID and event enter ID are empty");
+            return false;
+        }
+
+        if (paymentData.thoiGianVao.isEmpty()) {
+            Log.e(TAG, "Entry time is empty");
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Create parking log from events data
+     */
+    public void createParkingLogFromEvents(String vehicleId, String eventEnterId, String eventExitId,
+                                           String plateText, String vehicleType, ApiHelper.OnResponseListener listener) {
+        try {
+            JSONObject parkingLogData = new JSONObject();
+            parkingLogData.put("vehicle_id", vehicleId);
+            parkingLogData.put("event_enter_id", eventEnterId);
+            if (!eventExitId.isEmpty()) {
+                parkingLogData.put("event_exit_id", eventExitId);
+            }
+            parkingLogData.put("plate_text", plateText);
+            parkingLogData.put("vehicleType", vehicleType);
+            parkingLogData.put("status", eventExitId.isEmpty() ? "IN_PROGRESS" : "COMPLETED");
+            parkingLogData.put("createdAt", getCurrentDateTime());
+
+            Log.d(TAG, "Creating parking log from events: " + parkingLogData.toString());
+
+            ApiHelper.createParkingLog(parkingLogData.toString(), "", listener);
+
+        } catch (JSONException e) {
+            Log.e(TAG, "Error creating parking log data", e);
+            listener.onError("Error creating parking log: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Format date time string
+     */
+    private String formatDateTime(String dateTimeString) {
+        if (dateTimeString == null || dateTimeString.isEmpty()) {
+            return "";
+        }
 
         try {
-            SimpleDateFormat[] inputFormats = {
-                    new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault()),
-                    new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
-            };
-            SimpleDateFormat outputFormat = new SimpleDateFormat("HH:mm dd/MM/yyyy", Locale.getDefault());
+            // Try parsing ISO format first
+            SimpleDateFormat inputFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault());
+            SimpleDateFormat outputFormat = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault());
 
-            for (SimpleDateFormat format : inputFormats) {
-                try {
-                    Date date = format.parse(timeString.replace("Z", ""));
-                    return outputFormat.format(date);
-                } catch (Exception ignored) {}
-            }
-
-            if (timeString.matches("\\d+")) {
-                long timestamp = Long.parseLong(timeString);
-                if (timeString.length() == 10) timestamp *= 1000;
-                return outputFormat.format(new Date(timestamp));
-            }
+            Date date = inputFormat.parse(dateTimeString);
+            return outputFormat.format(date);
         } catch (Exception e) {
-            Log.e(TAG, "Error formatting time: " + timeString, e);
+            try {
+                // Try alternative ISO format
+                SimpleDateFormat inputFormat2 = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault());
+                SimpleDateFormat outputFormat = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault());
+
+                Date date = inputFormat2.parse(dateTimeString);
+                return outputFormat.format(date);
+            } catch (Exception e2) {
+                Log.e(TAG, "Error formatting date time: " + dateTimeString, e2);
+                return dateTimeString; // Return original if can't parse
+            }
         }
-        return timeString;
     }
 
-    private String getDisplayVehicleType(String vehicleType) {
-        if (vehicleType == null || vehicleType.isEmpty()) return "Ô tô dưới 9 chỗ";
-
-        switch (vehicleType.toUpperCase()) {
-            case "CAR_UNDER_9": return "Ô tô dưới 9 chỗ";
-            case "CAR_9_TO_16": return "Ô tô 9-16 chỗ";
-            default: return "Ô tô dưới 9 chỗ";
+    /**
+     * Convert formatted date time to ISO format
+     */
+    private String convertToISOFormat(String formattedDateTime) {
+        if (formattedDateTime == null || formattedDateTime.isEmpty()) {
+            return getCurrentDateTime();
         }
+
+        try {
+            SimpleDateFormat inputFormat = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault());
+            SimpleDateFormat outputFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault());
+
+            Date date = inputFormat.parse(formattedDateTime);
+            return outputFormat.format(date);
+        } catch (Exception e) {
+            Log.e(TAG, "Error converting to ISO format: " + formattedDateTime, e);
+            return getCurrentDateTime();
+        }
+    }
+
+    /**
+     * Get current date time in ISO format
+     */
+    private String getCurrentDateTime() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault());
+        return sdf.format(new Date());
+    }
+
+    /**
+     * Get current date time in display format
+     */
+    public static String getCurrentDisplayDateTime() {
+        SimpleDateFormat sdf = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault());
+        return sdf.format(new Date());
+    }
+
+    /**
+     * Extract plate text from various data formats
+     */
+    public static String extractPlateText(JSONObject data) {
+        // Try different possible field names
+        String[] plateFields = {"plate_text", "plateNumber", "plateText", "licensePlate", "bienSoXe"};
+
+        for (String field : plateFields) {
+            if (data.has(field) && !data.optString(field, "").isEmpty()) {
+                return data.optString(field, "");
+            }
+        }
+
+        return "";
+    }
+
+    /**
+     * Extract vehicle ID from various data formats
+     */
+    public static String extractVehicleId(JSONObject data) {
+        String[] vehicleIdFields = {"vehicle_id", "vehicleId", "id", "_id"};
+
+        for (String field : vehicleIdFields) {
+            if (data.has(field) && !data.optString(field, "").isEmpty()) {
+                return data.optString(field, "");
+            }
+        }
+
+        return "";
     }
 }

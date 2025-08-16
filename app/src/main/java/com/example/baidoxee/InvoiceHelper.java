@@ -98,12 +98,19 @@ public class InvoiceHelper {
     }
 
     private String getDisplayVehicleType(String vehicleType) {
-        return null;
-    }
-
-    public void displayInvoiceInfoFromEvents(TextView tvBienSoXe, TextView tvThoiGianVao, TextView tvThoiGianRa, TextView tvGiaVe, String bienSoXe, String vehicleType, String thoiGianVao, String thoiGianRa, long giaVe, String eventEnterId, String eventExitId, boolean hasParkingLog) {
-    }
-
-    public void showSuccessDialogFromEvents(String bienSoXe, String thoiGianVao, String thoiGianRa, long giaVe, String paymentMethodText, String eventEnterId, String eventExitId) {
+        switch (vehicleType) {
+            case "CAR_UNDER_9":
+                return "Ô tô dưới 9 chỗ";
+            case "CAR_9_TO_16":
+                return "Ô tô 9-16 chỗ";
+            case "MOTORCYCLE":
+                return "Xe máy";
+            case "TRUCK":
+                return "Xe tải";
+            case "BUS":
+                return "Xe buýt";
+            default:
+                return "Ô tô dưới 9 chỗ";
+        }
     }
 }
