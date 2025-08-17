@@ -78,7 +78,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="8dp"
-                    android:background="#F8F9FA"
+                    android:background="#E3F2FD"
                     android:padding="15dp"
                     android:text="🚗 Biển số xe: 29A-12345"
                     android:textColor="#333333"
